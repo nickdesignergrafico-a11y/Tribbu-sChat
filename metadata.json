@@ -1,0 +1,6 @@
+{
+  "name": "Tribbu'sChat",
+  "description": "Aplicativo de mensagens instantâneas em tempo real Tribbu'sChat - A voz da sua Tribbu. Conectividade rápida, canais diretos, grupos, compartilhamento e assistência inteligente nativa Tribbu AI com Gemini.",
+  "requestFramePermissions": ["camera", "microphone", "geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,52 @@
+{
+  "entities": {
+    "users": {
+      "title": "User Profiles",
+      "description": "User profiles authenticated via Firebase Phone Auth",
+      "type": "object",
+      "properties": {
+        "phoneNumber": { "type": "string", "description": "User's chip number in international format, e.g., +5511999999999" },
+        "displayName": { "type": "string" },
+        "avatarColor": { "type": "string" },
+        "initial": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["phoneNumber", "displayName", "avatarColor", "initial"]
+    },
+    "chats": {
+      "title": "Chat Conversations",
+      "description": "Direct and group conversation channels",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "isGroup": { "type": "boolean" },
+        "avatarColor": { "type": "string" },
+        "avatarLetter": { "type": "string" },
+        "createdBy": { "type": "string" },
+        "statusText": { "type": "string" },
+        "online": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "lastMessage": { "type": "string" },
+        "lastMessageTime": { "type": "string" },
+        "lastMessageTimestamp": { "type": "number" },
+        "unreadCount": { "type": "number" }
+      },
+      "required": ["name", "isGroup", "avatarColor", "avatarLetter", "createdBy"]
+    },
+    "chats/messages": {
+      "title": "Chat Messages",
+      "description": "Messages inside each conversation channel",
+      "type": "object",
+      "properties": {
+        "text": { "type": "string" },
+        "senderPhoneNumber": { "type": "string", "description": "The chip number of the person who sent the message" },
+        "senderName": { "type": "string" },
+        "senderId": { "type": "string" },
+        "time": { "type": "string" },
+        "timestamp": { "type": "number" },
+        "status": { "type": "string" }
+      },
+      "required": ["text", "senderPhoneNumber", "time", "timestamp"]
+    }
+  }
+}

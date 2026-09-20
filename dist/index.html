@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Tribbu'sChat</title>
+    <link rel="icon" type="image/png" href="./favicon.png" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <link rel="manifest" href="./manifest.json" />
+    <meta name="theme-color" content="#06B6D4" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Tribbu'sChat" />
+    <meta name="description" content="Aplicativo de mensagens instantâneas em tempo real Tribbu'sChat - A voz da sua Tribbu. Conectividade rápida, canais diretos, grupos, compartilhamento e assistência inteligente nativa Tribbu AI com Gemini." />
+    <meta property="og:title" content="Tribbu'sChat" />
+    <meta property="og:description" content="Aplicativo de mensagens instantâneas em tempo real Tribbu'sChat - A voz da sua Tribbu. Conectividade rápida, canais diretos, grupos, compartilhamento e assistência inteligente nativa Tribbu AI com Gemini." />
+    <script type="module" crossorigin src="./assets/index-D0l8KmXL.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-ygI2y4XD.css">
+  </head>
+  <body class="bg-slate-950 text-white">
+    <div id="root"></div>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          try {
+            navigator.serviceWorker.register('./sw.js').then((registration) => {
+              registration.update();
+            }).catch(() => {});
+          } catch (_) {}
+        });
+      }
+    </script>
+  </body>
+</html>
+

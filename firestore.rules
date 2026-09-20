@@ -1,0 +1,52 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Connection test verification
+    match /test/{docId} {
+      allow read: if true;
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Chats collection
+    match /chats/{chatId} {
+      allow read, write: if isAuthenticated();
+
+      // Messages subcollection
+      match /messages/{messageId} {
+        allow read, write: if isAuthenticated();
+      }
+
+      // Real-time typing & recording indicators
+      match /typing/{userId} {
+        allow read, write: if isAuthenticated();
+      }
+    }
+
+    // Status updates (Stories: photos and videos)
+    match /statuses/{statusId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // System Settings & Official Branding (Logo, Themes)
+    match /system_settings/{docId} {
+      // Allow public read so the logo is immediately visible on splash and login screen
+      allow read: if true;
+      allow write: if true;
+    }
+  }
+}
