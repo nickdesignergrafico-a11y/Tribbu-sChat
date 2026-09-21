@@ -140,9 +140,9 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
     setIsLoading(true);
 
     try {
-      // Configura o verificador reCAPTCHA invisível do Firebase
+      // Configura o verificador reCAPTCHA invisível vinculado ao botão de login
       if (!recaptchaVerifierRef.current) {
-        recaptchaVerifierRef.current = new RecaptchaVerifier(auth, 'recaptcha-container', {
+        recaptchaVerifierRef.current = new RecaptchaVerifier(auth, 'sign-in-button', {
           size: 'invisible',
           callback: () => {
             // reCAPTCHA resolvido com sucesso
@@ -170,6 +170,8 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
 
       if (err.code === 'auth/invalid-phone-number') {
         setError('Número de telefone inválido no formato internacional. Verifique o DDD e os números.');
+      } else if (err.code === 'auth/admin-restricted-operation') {
+        setError('Operação restrita pelo Firebase Auth: ative o provedor de Telefone no console do Firebase e adicione seu domínio/localhost nas origens autorizadas.');
       } else if (err.code === 'auth/quota-exceeded') {
         setError('Limite de SMS diário excedido. Em ambiente de testes, você pode usar o código de validação 123456.');
         setIsCodeSent(true);
@@ -370,77 +372,22 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         className="w-full max-w-[420px] bg-slate-900/80 rounded-3xl border border-cyan-500/20 backdrop-blur-2xl shadow-2xl p-7 sm:p-8 text-white/90 z-10 relative shadow-cyan-950/60"
         id="loginScreen"
       >
-        {/* Official Logo - Dynamic & Permanently Persisted */}
-        <div 
-          className="flex flex-col items-center mb-5 relative group/logo"
-          onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
-          onDrop={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            const file = e.dataTransfer.files?.[0];
-            if (file) handleOfficialLogoUpload(file);
-          }}
-        >
+        {/* Official Logo */}
+        <div className="flex flex-col items-center mb-5 relative group/logo">
           <div className="relative w-full max-w-[280px] sm:max-w-[320px] mx-auto mb-2 flex items-center justify-center">
             <img 
               src={logoUrl} 
               alt="Tribbu'sChat - A voz da sua Tribbu." 
-              className="w-full h-auto max-h-[140px] object-contain drop-shadow-[0_8px_25px_rgba(6,182,212,0.35)] cursor-pointer hover:scale-[1.03] transition-transform duration-300"
+              className="w-full h-auto max-h-[140px] object-contain drop-shadow-[0_8px_25px_rgba(6,182,212,0.35)]"
               referrerPolicy="no-referrer"
-              onClick={() => logoInputRef.current?.click()}
-              title="Clique para trocar o logotipo oficial do Tribbu'sChat"
               onError={(e) => {
                 const target = e.target as HTMLImageElement;
-                if (!target.src.includes('/tribbus-logo.png')) {
-                  target.src = '/tribbus-logo.png';
+                if (!target.src.includes('/icon/logo_oficial.png')) {
+                  target.src = '/icon/logo_oficial.png';
                 }
               }}
             />
-            <input 
-              ref={logoInputRef}
-              type="file"
-              accept="image/png,image/jpeg,image/webp,image/svg+xml"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) handleOfficialLogoUpload(file);
-              }}
-            />
           </div>
-
-          <div className="flex items-center gap-2 mb-2">
-            <button
-              type="button"
-              onClick={() => logoInputRef.current?.click()}
-              disabled={isUpdatingLogo}
-              className="px-3 py-1 bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-400/40 rounded-full text-cyan-300 hover:text-cyan-100 text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm shadow-cyan-950/40 cursor-pointer disabled:opacity-50"
-            >
-              <Upload className="w-3.5 h-3.5 text-cyan-400" />
-              {isUpdatingLogo ? 'Sincronizando novo logotipo...' : 'Trocar logotipo'}
-            </button>
-
-            {logoUrl !== '/tribbus-logo.png' && (
-              <button
-                type="button"
-                onClick={async () => {
-                  if (confirm('Deseja restaurar o logotipo original padrão?')) {
-                    await resetLogo();
-                  }
-                }}
-                disabled={isUpdatingLogo}
-                title="Restaurar logotipo original padrão"
-                className="p-1 hover:bg-white/10 text-white/40 hover:text-white/80 rounded-full text-xs transition-colors cursor-pointer"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
-
-          {logoSuccessMsg && (
-            <div className="mb-2 px-3 py-1.5 bg-emerald-500/20 border border-emerald-400/40 rounded-xl text-emerald-300 text-xs font-semibold text-center animate-pulse">
-              {logoSuccessMsg}
-            </div>
-          )}
 
           <p className="text-xs text-cyan-200/70 text-center font-medium">
             Identifique-se com seu número de chip para validação por SMS
@@ -549,6 +496,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
 
           {/* Submit Button */}
           <button
+            id="sign-in-button"
             type="submit"
             disabled={isLoading}
             className="w-full bg-gradient-to-r from-cyan-400 via-teal-400 to-emerald-400 hover:from-cyan-300 hover:via-teal-300 hover:to-emerald-300 text-slate-950 py-3 rounded-xl font-black text-sm tracking-wide shadow-lg shadow-cyan-500/25 transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-70 flex items-center justify-center gap-2 cursor-pointer mt-2"

@@ -6,8 +6,8 @@ export const LOCAL_STORAGE_LOGO_KEY = 'tribbus_custom_logo_url';
 export const LOCAL_STORAGE_LOGO_BASE64_KEY = 'tribbus_custom_logo_base64';
 export const LOCAL_STORAGE_LOGO_TIME_KEY = 'tribbus_custom_logo_time';
 
-export const DEFAULT_LOGO_URL = '/tribbus-logo.png';
-export const DEFAULT_SPLASH_LOGO_URL = '/tribbus-splash-logo.png';
+export const DEFAULT_LOGO_URL = '/icon/logo_oficial.png';
+export const DEFAULT_SPLASH_LOGO_URL = '/icon/logo_oficial.png';
 
 /**
  * Updates favicon and touch icons dynamically in document HEAD

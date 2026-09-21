@@ -267,42 +267,9 @@ export default function SettingsModal({
                     Logotipo Oficial da Marca
                   </h4>
                   <p className="text-[10px] text-cyan-200/70">
-                    Sincronizado na nuvem (Splash, Login, Barra e Ícones)
+                    Logotipo oficial estático do Tribbu'sChat
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
-                  {logoUrl !== '/tribbus-logo.png' && (
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        if (confirm('Deseja restaurar o logotipo padrão?')) {
-                          await resetLogo();
-                        }
-                      }}
-                      disabled={isUpdatingLogo}
-                      title="Restaurar padrão"
-                      className="p-1.5 hover:bg-white/10 text-white/50 hover:text-white/90 rounded-lg text-xs transition-colors cursor-pointer"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => logoFileInputRef.current?.click()}
-                    disabled={isUpdatingLogo}
-                    className="px-2.5 py-1.5 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-400/40 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
-                  >
-                    <Upload className="w-3.5 h-3.5 text-cyan-400" />
-                    {isUpdatingLogo ? 'Salvando na Nuvem...' : 'Trocar Logotipo'}
-                  </button>
-                </div>
-                <input
-                  ref={logoFileInputRef}
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
-                  className="hidden"
-                  onChange={handleLogoUpload}
-                />
               </div>
 
               {/* Preview of Official Logo */}
@@ -314,8 +281,8 @@ export default function SettingsModal({
                   referrerPolicy="no-referrer"
                   onError={(e) => {
                     const target = e.target as HTMLImageElement;
-                    if (!target.src.includes('/tribbus-logo.png')) {
-                      target.src = '/tribbus-logo.png';
+                    if (!target.src.includes('/icon/logo_oficial.png')) {
+                      target.src = '/icon/logo_oficial.png';
                     }
                   }}
                 />
