@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Lock, Eye, EyeOff, Phone, CheckCircle2, RotateCcw, Upload, Sparkles } from 'lucide-react';
+import { Lock, Eye, EyeOff, Phone, CheckCircle2, RotateCcw, Upload, Sparkles, ChevronDown } from 'lucide-react';
 import { 
   RecaptchaVerifier, 
   signInWithPhoneNumber, 
@@ -22,22 +22,33 @@ const AVATAR_COLORS = [
   '#14B8A6', '#0284C7', '#3B82F6', '#6366F1', '#F59E0B'
 ];
 
+export const COUNTRY_CODES = [
+  { code: '+55', name: 'Brasil', flag: '🇧🇷' },
+  { code: '+1', name: 'Estados Unidos / Canadá', flag: '🇺🇸' },
+  { code: '+351', name: 'Portugal', flag: '🇵🇹' },
+  { code: '+34', name: 'Espanha', flag: '🇪🇸' },
+  { code: '+44', name: 'Reino Unido', flag: '🇬🇧' },
+  { code: '+49', name: 'Alemanha', flag: '🇩🇪' },
+  { code: '+33', name: 'França', flag: '🇫🇷' },
+  { code: '+39', name: 'Itália', flag: '🇮🇹' },
+  { code: '+54', name: 'Argentina', flag: '🇦🇷' },
+  { code: '+595', name: 'Paraguai', flag: '🇵🇾' },
+  { code: '+598', name: 'Uruguai', flag: '🇺🇾' },
+  { code: '+56', name: 'Chile', flag: '🇨🇱' },
+  { code: '+57', name: 'Colômbia', flag: '🇨🇴' },
+  { code: '+52', name: 'México', flag: '🇲🇽' },
+  { code: '+81', name: 'Japão', flag: '🇯🇵' },
+  { code: '+244', name: 'Angola', flag: '🇦🇴' },
+  { code: '+258', name: 'Moçambique', flag: '🇲🇿' },
+];
+
 /**
- * Format raw user input into phone representation: e.g. +55 (11) 99999-9999 or (11) 99999-9999
+ * Format raw local user input into phone representation: e.g. (11) 99999-9999 or (63) 99262-4090
  */
 export function formatPhoneDisplay(value: string): string {
   const digits = value.replace(/\D/g, '');
   if (!digits) return '';
 
-  // If starts with 55 (Brazil country code)
-  if (digits.startsWith('55') && digits.length > 2) {
-    const local = digits.slice(2);
-    if (local.length <= 2) return `+55 (${local}`;
-    if (local.length <= 7) return `+55 (${local.slice(0, 2)}) ${local.slice(2)}`;
-    return `+55 (${local.slice(0, 2)}) ${local.slice(2, 7)}-${local.slice(7, 11)}`;
-  }
-
-  // Without country code typed:
   if (digits.length <= 2) return `(${digits}`;
   if (digits.length <= 6) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
   if (digits.length <= 10) return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
@@ -45,7 +56,25 @@ export function formatPhoneDisplay(value: string): string {
 }
 
 /**
- * Normalizes any phone input into international E.164 format: e.g. +5511999999999
+ * Combines DDI + local phone digits into strict international E.164 format: e.g. +5563992624090
+ */
+export function buildFullPhoneNumber(countryCode: string, phone: string): string {
+  const cleanCode = countryCode.trim().startsWith('+') ? countryCode.trim() : `+${countryCode.trim().replace(/\D/g, '')}`;
+  const phoneDigits = phone.replace(/\D/g, '');
+  const codeDigits = cleanCode.replace(/\D/g, '');
+
+  if (!phoneDigits) return cleanCode;
+
+  // Se o usuário digitou o DDI junto no input local, previne duplicação
+  if (phoneDigits.startsWith(codeDigits) && phoneDigits.length > codeDigits.length + 8) {
+    return `+${phoneDigits}`;
+  }
+
+  return `${cleanCode}${phoneDigits}`;
+}
+
+/**
+ * Normalizes any phone input into international E.164 format
  */
 export function normalizePhoneNumber(raw: string): string {
   const digits = raw.replace(/\D/g, '');
@@ -59,7 +88,6 @@ export function normalizePhoneNumber(raw: string): string {
     return `+${digits}`;
   }
 
-  // If Brazilian standard DDD + 8 or 9 digits (10 or 11 digits total)
   if (digits.length === 10 || digits.length === 11) {
     return `+55${digits}`;
   }
@@ -68,6 +96,7 @@ export function normalizePhoneNumber(raw: string): string {
 }
 
 export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
+  const [countryCode, setCountryCode] = useState('+55');
   const [phoneInput, setPhoneInput] = useState('');
   const [smsCode, setSmsCode] = useState('');
   const [showCode, setShowCode] = useState(false);
@@ -91,6 +120,12 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
   const recaptchaVerifierRef = useRef<RecaptchaVerifier | null>(null);
 
   useEffect(() => {
+    // Limpa qualquer erro de expiração antigo e reseta o fluxo ao iniciar a tela
+    setError('');
+    setSuccess('');
+    setIsCodeSent(false);
+    setSmsCode('');
+
     return () => {
       if (recaptchaVerifierRef.current) {
         try {
@@ -123,37 +158,43 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
     if (error) setError('');
   };
 
-  // 1º Clique: Dispara o SMS com signInWithPhoneNumber do Firebase
+  // 1º Clique: Dispara o SMS com signInWithPhoneNumber do Firebase concatenando DDI + Telefone
   const handleSendSms = async () => {
     setError('');
     setSuccess('');
 
-    const cleanPhone = normalizePhoneNumber(phoneInput);
-    const digitsOnly = cleanPhone.replace(/\D/g, '');
+    const cleanPhone = buildFullPhoneNumber(countryCode, phoneInput);
+    const localDigits = phoneInput.replace(/\D/g, '');
 
-    // Validação mínima de 10 dígitos (DDD + 8 ou 9 números)
-    if (digitsOnly.length < 10) {
-      setError('Por favor, insira um número de telefone com DDD válido (mínimo 10 dígitos). Ex: +55 (11) 99999-9999');
+    // Validação mínima de 10 dígitos locais (DDD + 8 ou 9 números)
+    if (localDigits.length < 10) {
+      setError('Por favor, insira o número completo com DDD (mínimo 10 dígitos). Ex: (63) 99262-4090');
       return;
     }
 
     setIsLoading(true);
 
     try {
-      // Configura o verificador reCAPTCHA invisível vinculado ao botão de login
-      if (!recaptchaVerifierRef.current) {
-        recaptchaVerifierRef.current = new RecaptchaVerifier(auth, 'sign-in-button', {
-          size: 'invisible',
-          callback: () => {
-            // reCAPTCHA resolvido com sucesso
-          },
-          'expired-callback': () => {
-            setError('A validação de segurança expirou. Clique para reenviar o SMS.');
-          }
-        });
+      // Limpa qualquer verificador anterior para evitar reutilização de estado expirado
+      if (recaptchaVerifierRef.current) {
+        try {
+          recaptchaVerifierRef.current.clear();
+          recaptchaVerifierRef.current = null;
+        } catch (_) {}
       }
 
-      // Dispara o SMS através do signInWithPhoneNumber do Firebase
+      // Configura o verificador reCAPTCHA invisível vinculado ao botão de login
+      recaptchaVerifierRef.current = new RecaptchaVerifier(auth, 'sign-in-button', {
+        size: 'invisible',
+        callback: () => {
+          // reCAPTCHA resolvido com sucesso
+        },
+        'expired-callback': () => {
+          setError('A validação de segurança expirou. Clique em "Reenviar código" para receber um novo SMS.');
+        }
+      });
+
+      // Dispara o SMS através do signInWithPhoneNumber do Firebase com o número internacional completo (+55...)
       const confirmation = await signInWithPhoneNumber(auth, cleanPhone, recaptchaVerifierRef.current);
       confirmationResultRef.current = confirmation;
       setIsCodeSent(true);
@@ -169,7 +210,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
       }
 
       if (err.code === 'auth/invalid-phone-number') {
-        setError('Número de telefone inválido no formato internacional. Verifique o DDD e os números.');
+        setError('Número de telefone inválido no formato internacional. Verifique o código do país e o número digitado.');
       } else if (err.code === 'auth/admin-restricted-operation') {
         setError('Operação restrita pelo Firebase Auth: ative o provedor de Telefone no console do Firebase e adicione seu domínio/localhost nas origens autorizadas.');
       } else if (err.code === 'auth/quota-exceeded') {
@@ -199,7 +240,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
       return;
     }
 
-    const cleanPhone = normalizePhoneNumber(phoneInput);
+    const cleanPhone = buildFullPhoneNumber(countryCode, phoneInput);
     setIsLoading(true);
 
     try {
@@ -407,34 +448,74 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Phone Number Input */}
+          {/* Phone Number & Country Code (DDI) Input */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <label className="text-xs font-medium text-white/70 block" htmlFor="phoneNumber">
                 Número de Telefone / Chip (com DDD)
               </label>
-              <span className="text-[10px] text-cyan-400/60 font-mono">Ex: +55 (11) 99999-9999</span>
+              {isCodeSent ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsCodeSent(false);
+                    setSmsCode('');
+                    setError('');
+                    setSuccess('');
+                  }}
+                  className="text-[10px] text-cyan-400 hover:text-cyan-300 underline cursor-pointer"
+                >
+                  Alterar número
+                </button>
+              ) : (
+                <span className="text-[10px] text-cyan-400/60 font-mono">Ex: (63) 99262-4090</span>
+              )}
             </div>
-            <div className="relative">
-              <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-cyan-400/60">
-                <Phone className="w-4 h-4" />
-              </span>
-              <input
-                id="phoneNumber"
-                type="tel"
-                required
-                value={phoneInput}
-                onChange={handlePhoneChange}
-                placeholder="+55 (11) 99999-9999"
-                className="w-full pl-10 pr-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-sm text-white placeholder-white/20 focus:outline-none focus:ring-2 focus:ring-cyan-400/50 focus:border-cyan-400/60 transition-all font-mono"
-              />
+
+            <div className="flex items-center gap-2">
+              {/* DDI Country Code Selector */}
+              <div className="relative w-[110px] shrink-0">
+                <select
+                  id="countryCode"
+                  value={countryCode}
+                  onChange={(e) => setCountryCode(e.target.value)}
+                  disabled={isCodeSent || isLoading}
+                  className="w-full appearance-none bg-white/5 border border-white/10 rounded-xl py-2.5 pl-3 pr-7 text-sm text-cyan-300 font-mono font-semibold focus:outline-none focus:ring-2 focus:ring-cyan-400/50 focus:border-cyan-400/60 transition-all cursor-pointer disabled:opacity-75"
+                  title="Código do País (DDI)"
+                >
+                  {COUNTRY_CODES.map((c) => (
+                    <option key={c.code} value={c.code} className="bg-slate-900 text-white text-xs">
+                      {c.flag} {c.code}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="w-3.5 h-3.5 text-cyan-400/60 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              </div>
+
+              {/* Local Phone Input */}
+              <div className="relative flex-1">
+                <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-cyan-400/60 pointer-events-none">
+                  <Phone className="w-4 h-4" />
+                </span>
+                <input
+                  id="phoneNumber"
+                  type="tel"
+                  required
+                  disabled={isCodeSent || isLoading}
+                  value={phoneInput}
+                  onChange={handlePhoneChange}
+                  placeholder="(63) 99262-4090"
+                  className="w-full pl-10 pr-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-sm text-white placeholder-white/20 focus:outline-none focus:ring-2 focus:ring-cyan-400/50 focus:border-cyan-400/60 transition-all font-mono disabled:opacity-75"
+                />
+              </div>
             </div>
+
             <p className="text-[10px] text-white/40">
-              Enviaremos um código SMS com 6 dígitos de validação.
+              Enviaremos um código SMS com 6 dígitos de validação para {countryCode} {phoneInput || 'seu número'}.
             </p>
           </div>
 
-          {/* SMS Verification Code input */}
+          {/* ETAPA 2: SMS Verification Code input (exibido apenas após o envio com sucesso) */}
           {isCodeSent && (
             <div className="space-y-1.5 animate-in fade-in slide-in-from-top-2 duration-300">
               <div className="flex items-center justify-between">
@@ -502,12 +583,15 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             className="w-full bg-gradient-to-r from-cyan-400 via-teal-400 to-emerald-400 hover:from-cyan-300 hover:via-teal-300 hover:to-emerald-300 text-slate-950 py-3 rounded-xl font-black text-sm tracking-wide shadow-lg shadow-cyan-500/25 transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-70 flex items-center justify-center gap-2 cursor-pointer mt-2"
           >
             {isLoading ? (
-              <svg className="animate-spin h-5 w-5 text-slate-950" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-              </svg>
+              <span className="flex items-center gap-2">
+                <svg className="animate-spin h-5 w-5 text-slate-950" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                <span>{!isCodeSent ? 'Enviando Código via SMS...' : 'Validando Código...'}</span>
+              </span>
             ) : !isCodeSent ? (
-              'Enviar Código SMS'
+              'Enviar Código via SMS'
             ) : (
               'Validar Código e Acessar'
             )}
