@@ -1,11 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Lock, Eye, EyeOff, Phone, CheckCircle2, RotateCcw, Upload, Sparkles, ChevronDown } from 'lucide-react';
+import { Lock, Eye, EyeOff, Phone, CheckCircle2, RotateCcw, Upload, ChevronDown } from 'lucide-react';
 import { 
   RecaptchaVerifier, 
   signInWithPhoneNumber, 
-  ConfirmationResult, 
-  signInAnonymously
+  ConfirmationResult
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, getDocs, collection, query, where } from 'firebase/firestore';
 import { auth, db } from '../firebase';
@@ -211,18 +210,12 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
 
       if (err.code === 'auth/invalid-phone-number') {
         setError('Número de telefone inválido no formato internacional. Verifique o código do país e o número digitado.');
-      } else if (err.code === 'auth/admin-restricted-operation') {
-        setError('Operação restrita pelo Firebase Auth: ative o provedor de Telefone no console do Firebase e adicione seu domínio/localhost nas origens autorizadas.');
       } else if (err.code === 'auth/quota-exceeded') {
-        setError('Limite de SMS diário excedido. Em ambiente de testes, você pode usar o código de validação 123456.');
-        setIsCodeSent(true);
+        setError('Limite de envio de SMS atingido temporariamente. Aguarde alguns minutos e tente novamente.');
       } else if (err.code === 'auth/captcha-check-failed') {
-        setError('Falha na validação de segurança (reCAPTCHA). Tente reenviar.');
-      } else if (err.code === 'auth/operation-not-allowed') {
-        setError('A autenticação por Telefone (SMS) precisa estar ativa no Firebase Console. Para testes rápidos, utilize o código 123456.');
-        setIsCodeSent(true);
+        setError('Falha na validação de segurança. Tente reenviar o código.');
       } else {
-        setError(err.message || 'Erro ao disparar SMS. Verifique o número digitado.');
+        setError('Não foi possível enviar o código SMS no momento. Verifique os dados digitados e tente novamente.');
       }
     } finally {
       setIsLoading(false);
@@ -244,54 +237,55 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
     setIsLoading(true);
 
     try {
-      let fbUser: any = null;
-
-      if (confirmationResultRef.current) {
-        // Validação real do código com o Firebase Auth
-        const userCredential = await confirmationResultRef.current.confirm(cleanCode);
-        fbUser = userCredential.user;
-      } else if (cleanCode === '123456') {
-        // Teste de simulação/fallback seguro para testes
-        if (auth.currentUser) {
-          fbUser = auth.currentUser;
-        } else {
-          const anon = await signInAnonymously(auth);
-          fbUser = anon.user;
-        }
-      } else {
+      if (!confirmationResultRef.current) {
         setError('Nenhum envio de SMS ativo. Clique primeiro para enviar o código.');
         setIsCodeSent(false);
         setIsLoading(false);
         return;
       }
 
+      // Validação real do código com o Firebase Auth
+      const userCredential = await confirmationResultRef.current.confirm(cleanCode);
+      const fbUser = userCredential.user;
+
       if (!fbUser) {
         throw new Error('Falha ao autenticar usuário com o código fornecido.');
       }
 
-      // Consulta a coleção /users no Firestore para saber se já é cadastrado
-      const userDocRef = doc(db, 'users', fbUser.uid);
-      const existingDoc = await getDoc(userDocRef);
-      let existingData = existingDoc.exists() ? existingDoc.data() : null;
-
-      // Se não encontrou por UID direto, consulta por phoneNumber
-      if (!existingData) {
-        try {
-          const q = query(collection(db, 'users'), where('phoneNumber', '==', cleanPhone));
-          const snap = await getDocs(q);
-          if (!snap.empty) {
-            existingData = snap.docs[0].data();
+      // Consulta protegida com timeout na coleção /users do Firestore para saber se já é cadastrado
+      let existingData: any = null;
+      try {
+        const fetchUserData = async () => {
+          const userDocRef = doc(db, 'users', fbUser.uid);
+          const existingDoc = await getDoc(userDocRef);
+          if (existingDoc.exists()) {
+            return existingDoc.data();
           }
-        } catch (queryErr) {
-          console.warn('Busca de usuário por telefone no Firestore:', queryErr);
-        }
+
+          // Se não encontrou pelo UID direto, tenta busca por número de telefone
+          try {
+            const q = query(collection(db, 'users'), where('phoneNumber', '==', cleanPhone));
+            const snap = await getDocs(q);
+            if (!snap.empty) {
+              return snap.docs[0].data();
+            }
+          } catch (_) {}
+
+          return null;
+        };
+
+        // Timeout seguro de 3.5 segundos para garantir que o usuário nunca fique travado
+        const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3500));
+        existingData = await Promise.race([fetchUserData(), timeoutPromise]);
+      } catch (firestoreErr) {
+        console.warn('Verificação de usuário no Firestore com fallback rápido:', firestoreErr);
       }
 
       // SE FOR NOVO USUÁRIO (não cadastrado na coleção /users ou sem displayName configurado):
-      // Redireciona para a tela de onboarding em Dark Mode!
+      // Redireciona imediatamente para a tela de cadastro/criação de perfil (/cadastro)
       if (!existingData || !existingData.displayName) {
         setIsLoading(false);
-        setSuccess('✓ Número SMS validado com sucesso! Redirecionando para o cadastro...');
+        setSuccess('✓ Número SMS validado com sucesso! Abrindo tela de cadastro...');
         setPendingOnboardingUser({
           uid: fbUser.uid,
           phoneNumber: cleanPhone,
@@ -303,40 +297,27 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
       }
 
       // USUÁRIO EXISTENTE:
-      // Já possui cadastro na coleção /users, entra diretamente no chat!
+      // Já possui cadastro na coleção /users, redireciona imediatamente para a tela principal do chat (/chat)
       const resolvedDisplayName = existingData.displayName;
       const initial = existingData.initial || (resolvedDisplayName.charAt(0).toUpperCase() || 'U');
       const avatarColor = existingData.avatarColor || AVATAR_COLORS[0];
       const finalPhotoURL = existingData.photoURL || null;
 
-      // Atualiza status online e lastSeen
+      // Atualiza status online em background sem bloquear a navegação
       try {
-        await setDoc(userDocRef, {
+        const userDocRef = doc(db, 'users', fbUser.uid);
+        setDoc(userDocRef, {
           isOnline: true,
           lastSeen: Date.now()
-        }, { merge: true });
+        }, { merge: true }).catch(() => {});
       } catch (_) {}
 
-      // Sincroniza sessão com a API do servidor Express
-      let serverToken = '';
+      // Obtenção rápida de credenciais de sessão
+      let idToken = '';
       try {
-        const res = await fetch('/api/auth/phone-login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            phoneNumber: cleanPhone,
-            displayName: resolvedDisplayName
-          })
-        });
-        if (res.ok) {
-          const data = await res.json();
-          serverToken = data.token;
-        }
-      } catch (err) {
-        console.warn('Backend sync warning:', err);
-      }
+        idToken = await fbUser.getIdToken();
+      } catch (_) {}
 
-      const idToken = serverToken || (await fbUser.getIdToken());
       const session: UserSession = {
         uid: fbUser.uid,
         phoneNumber: cleanPhone,
@@ -349,13 +330,16 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
 
       try {
         localStorage.setItem('zapchat_user', JSON.stringify(session));
-        localStorage.setItem('zapchat_token', idToken);
+        if (idToken) {
+          localStorage.setItem('zapchat_token', idToken);
+        }
       } catch (_) {}
 
-      setSuccess(`✓ Código validado! Bem-vindo de volta, ${resolvedDisplayName}!`);
-      setTimeout(() => {
-        onLoginSuccess(session, idToken);
-      }, 500);
+      // Finaliza o loading imediatamente e executa o redirecionamento para o chat principal
+      setIsLoading(false);
+      setSuccess(`✓ Código validado! Bem-vindo, ${resolvedDisplayName}!`);
+      onLoginSuccess(session, idToken);
+      return;
 
     } catch (err: any) {
       console.error('Erro ao validar código SMS:', err);
@@ -597,14 +581,6 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             )}
           </button>
         </form>
-
-        {/* Informative helper note */}
-        <div className="mt-5 pt-3 border-t border-white/10 text-center">
-          <p className="text-[11px] text-cyan-200/60 leading-relaxed flex items-center justify-center gap-1">
-            <Sparkles className="w-3 h-3 text-cyan-400" />
-            <span>Novos usuários configuram o <strong>Nome</strong> e <strong>Foto</strong> após a validação do SMS.</span>
-          </p>
-        </div>
       </motion.div>
     </div>
   );
