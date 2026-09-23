@@ -78,12 +78,12 @@ export default function SplashScreen({ onComplete, durationMs = 2000 }: SplashSc
                   <div className="absolute inset-4 bg-gradient-to-r from-cyan-500/25 via-blue-500/20 to-emerald-500/25 rounded-3xl blur-2xl opacity-80 pointer-events-none animate-pulse" />
                   
                   <img
-                    src={logoUrl || "/tribbus-splash-logo.png"}
+                    src={logoUrl || "/icon/logo_oficial.png"}
                     alt="Tribbu'sChat - A voz da sua Tribbu."
                     className="relative z-10 w-full h-auto max-h-[260px] sm:max-h-[300px] object-contain drop-shadow-[0_10px_35px_rgba(6,182,212,0.35)] transition-transform duration-700 hover:scale-[1.02]"
                     referrerPolicy="no-referrer"
                     onError={() => {
-                      if (logoUrl !== '/tribbus-logo.png') {
+                      if (logoUrl !== '/icon/logo_oficial.png') {
                         setImageError(false);
                       } else {
                         setImageError(true);
@@ -97,7 +97,7 @@ export default function SplashScreen({ onComplete, durationMs = 2000 }: SplashSc
                   <div className="relative mb-5">
                     <div className="w-28 h-28 sm:w-32 sm:h-32 rounded-3xl overflow-hidden shadow-2xl border-2 border-cyan-400/60 p-1 bg-gradient-to-br from-cyan-500/20 via-slate-900 to-emerald-500/25 flex items-center justify-center shadow-cyan-500/30">
                       <img
-                        src="/tribbus-logo.png"
+                        src="/icon/logo_oficial.png"
                         alt="Tribbu'sChat"
                         className="w-full h-full object-cover rounded-2xl"
                         referrerPolicy="no-referrer"

@@ -51,6 +51,29 @@ export interface UserSession {
   photoURL?: string;
   about?: string;
   createdAt?: string;
+  profileCompleted?: boolean;
+}
+
+/**
+ * Checks whether a user profile is fully completed with a chosen display name,
+ * rather than an uncompleted profile or a raw phone number.
+ */
+export function isUserProfileComplete(userData?: any): boolean {
+  if (!userData) return false;
+  if (userData.profileCompleted === true) return true;
+
+  const name = (userData.displayName || '').trim();
+  if (!name) return false;
+
+  // If the displayName is just a phone number, the profile is not yet completed
+  const phoneDigits = (userData.phoneNumber || '').replace(/\D/g, '');
+  const nameDigits = name.replace(/\D/g, '');
+
+  if (name.startsWith('+') && nameDigits.length >= 8) return false;
+  if (phoneDigits && nameDigits === phoneDigits) return false;
+  if (/^\+?[\d\s\-()]+$/.test(name) && nameDigits.length >= 8) return false;
+
+  return true;
 }
 
 export interface TextStatusStyle {

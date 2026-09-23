@@ -1,14 +1,14 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Camera, Upload, Trash2, User, Phone, CheckCircle2, Sparkles, MessageSquare } from 'lucide-react';
-import { updateProfile, User as FirebaseUser } from 'firebase/auth';
-import { doc, setDoc } from 'firebase/firestore';
+import { Camera, Upload, Trash2, User, Phone, CheckCircle2, Sparkles, MessageSquare, ArrowLeft } from 'lucide-react';
+import { updateProfile } from 'firebase/auth';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
-import { UserSession } from '../types';
 import CameraCaptureModal from './CameraCaptureModal';
 import { resizeAndCompressImage } from '../utils/imageUtils';
 import { uploadProfilePhoto } from '../services/storageService';
 import { useBranding } from '../context/BrandingContext';
+import { isUserProfileComplete } from '../types';
 
 export const AVATAR_COLORS = [
   '#06B6D4', // cyan-500
@@ -21,23 +21,28 @@ export const AVATAR_COLORS = [
   '#6366F1'  // indigo-500
 ];
 
-interface OnboardingScreenProps {
-  user: {
-    uid: string;
-    phoneNumber?: string;
-    email?: string;
-    displayName?: string;
-    photoURL?: string;
-  };
-  onComplete: (session: UserSession, idToken: string) => void;
-  onCancel?: () => void;
-}
+export default function Cadastro({ user, onComplete, onNavigate, onCancel }) {
+  // Resolve current authenticated or pending user
+  const currentUser = auth.currentUser;
+  let storedPending = null;
+  if (typeof window !== 'undefined') {
+    try {
+      const s = sessionStorage.getItem('tribbu_pending_user');
+      if (s) storedPending = JSON.parse(s);
+    } catch (_) {}
+  }
+  const storedPhone = typeof window !== 'undefined' ? (localStorage.getItem('tribbu_pending_phone') || '') : '';
+  const effectiveUser = user || storedPending || currentUser;
+  const initialPhone = effectiveUser?.phoneNumber || currentUser?.phoneNumber || storedPhone || (currentUser?.email?.includes('@zapchat.phone') ? ('+' + currentUser.email.replace('@zapchat.phone', '')) : '') || '';
+  const initialUid = effectiveUser?.uid || currentUser?.uid || '';
+  const rawDisplayName = effectiveUser?.displayName || currentUser?.displayName || '';
+  const cleanInitialName = isUserProfileComplete({ displayName: rawDisplayName, phoneNumber: initialPhone }) ? rawDisplayName : '';
 
-export default function OnboardingScreen({ user, onComplete, onCancel }: OnboardingScreenProps) {
-  const [displayName, setDisplayName] = useState('');
+  const [displayName, setDisplayName] = useState(cleanInitialName);
+  const [phone, setPhone] = useState(initialPhone);
   const [about, setAbout] = useState('Disponível na Tribbu');
-  const [photoURL, setPhotoURL] = useState<string | null>(null);
-  const [selectedColor, setSelectedColor] = useState<string>(() => {
+  const [photoURL, setPhotoURL] = useState(effectiveUser?.photoURL || currentUser?.photoURL || null);
+  const [selectedColor, setSelectedColor] = useState(() => {
     return AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)];
   });
   const [isCameraOpen, setIsCameraOpen] = useState(false);
@@ -45,18 +50,22 @@ export default function OnboardingScreen({ user, onComplete, onCancel }: Onboard
   const [error, setError] = useState('');
 
   const { logoUrl } = useBranding();
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const fileInputRef = useRef(null);
 
-  // Dynamic calculation according to entities.json specification:
+  // Sync with auth user if not provided via props
+  useEffect(() => {
+    if (!initialPhone && auth.currentUser?.phoneNumber) {
+      setPhone(auth.currentUser.phoneNumber);
+    }
+  }, [initialPhone]);
+
+  // Dynamic initial calculation according to entities.json specification:
   // initial: first letter of displayName uppercase
-  // avatarColor: hex color for placeholder avatar
   const trimmedName = displayName.trim();
   const calculatedInitial = (trimmedName.charAt(0) || 'U').toUpperCase();
-
-  // Pick or calculate avatar color automatically
   const dynamicAvatarColor = selectedColor || AVATAR_COLORS[(calculatedInitial.charCodeAt(0) || 0) % AVATAR_COLORS.length];
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e) => {
     const file = e.target.files?.[0];
     if (file) {
       try {
@@ -69,7 +78,7 @@ export default function OnboardingScreen({ user, onComplete, onCancel }: Onboard
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
 
@@ -81,44 +90,43 @@ export default function OnboardingScreen({ user, onComplete, onCancel }: Onboard
     setIsSubmitting(true);
 
     try {
-      const cleanPhone = user.phoneNumber || (user.email?.includes('@zapchat.phone') 
-        ? ('+' + user.email.replace('@zapchat.phone', '')) 
-        : '+5511999999999');
+      const activeUser = auth.currentUser;
+      const targetUid = user?.uid || activeUser?.uid || initialUid || `user_${Date.now()}`;
+      const cleanPhone = phone || user?.phoneNumber || activeUser?.phoneNumber || '+5511999999999';
 
-      // 1. Upload profile photo to Firebase Storage if user selected an image
-      let finalPhotoURL: string | null = null;
+      // 1. Upload foto de perfil para o Firebase Storage se o usuário escolheu uma imagem
+      let finalPhotoURL = null;
       if (photoURL) {
         try {
-          finalPhotoURL = await uploadProfilePhoto(user.uid, photoURL);
+          finalPhotoURL = await uploadProfilePhoto(targetUid, photoURL);
         } catch (storageErr) {
-          console.warn('Falha no upload do Firebase Storage, utilizando imagem local:', storageErr);
+          console.warn('[Cadastro] Falha no upload ao Firebase Storage, usando representação inline:', storageErr);
           finalPhotoURL = photoURL;
         }
       }
 
       // 2. Conforme entities.json:
-      // Se não selecionar foto, gera avatarColor e initial automaticamente
+      // Se o usuário não escolher foto, aplica a regra automática gerando as iniciais e avatarColor
       const finalInitial = calculatedInitial;
       const finalAvatarColor = dynamicAvatarColor;
       const nowTimestamp = Date.now();
       const nowIso = new Date().toISOString();
 
-      // 3. Atualiza o perfil no Firebase Auth
-      const currentUser = auth.currentUser;
-      if (currentUser) {
+      // 3. Atualiza Firebase Auth Profile
+      if (activeUser) {
         try {
-          await updateProfile(currentUser, {
+          await updateProfile(activeUser, {
             displayName: trimmedName,
             photoURL: finalPhotoURL || undefined
           });
         } catch (authErr) {
-          console.warn('Erro ao atualizar auth profile:', authErr);
+          console.warn('[Cadastro] Erro ao atualizar profile auth:', authErr);
         }
       }
 
-      // 4. Salva o registro completo na coleção /users do Firestore (conforme entities.json)
+      // 4. Grava dados do novo usuário no Firestore (vinculando ao phoneNumber autenticado)
       const userProfileData = {
-        uid: user.uid,
+        uid: targetUid,
         phoneNumber: cleanPhone,
         displayName: trimmedName,
         avatarColor: finalAvatarColor,
@@ -127,13 +135,14 @@ export default function OnboardingScreen({ user, onComplete, onCancel }: Onboard
         about: about.trim() || 'Disponível na Tribbu',
         lastSeen: nowTimestamp,
         isOnline: true,
+        profileCompleted: true,
         createdAt: nowIso
       };
 
-      const userDocRef = doc(db, 'users', user.uid);
+      const userDocRef = doc(db, 'users', targetUid);
       await setDoc(userDocRef, userProfileData, { merge: true });
 
-      // 5. Sincroniza sessão com a API do servidor Express
+      // Sincroniza com API backend se disponível
       let serverToken = '';
       try {
         const res = await fetch('/api/auth/phone-login', {
@@ -148,21 +157,20 @@ export default function OnboardingScreen({ user, onComplete, onCancel }: Onboard
           const data = await res.json();
           serverToken = data.token;
         }
-      } catch (backendErr) {
-        console.warn('Sincronização com backend opcional:', backendErr);
-      }
+      } catch (_) {}
 
-      const idToken = serverToken || (currentUser ? await currentUser.getIdToken() : `token-${user.uid}`);
+      const idToken = serverToken || (activeUser ? await activeUser.getIdToken() : `token_${targetUid}`);
 
-      const session: UserSession = {
-        uid: user.uid,
+      const session = {
+        uid: targetUid,
         phoneNumber: cleanPhone,
         displayName: trimmedName,
         initial: finalInitial,
         avatarColor: finalAvatarColor,
         photoURL: finalPhotoURL || undefined,
         about: about.trim() || 'Disponível na Tribbu',
-        email: user.email
+        email: user?.email || activeUser?.email || undefined,
+        profileCompleted: true
       };
 
       // Grava no localStorage para consistência imediata
@@ -171,19 +179,37 @@ export default function OnboardingScreen({ user, onComplete, onCancel }: Onboard
         localStorage.setItem('zapchat_token', idToken);
       } catch (_) {}
 
-      // 6. Direciona o usuário para a interface principal do chat
-      onComplete(session, idToken);
+      // 5. Navega para o chat principal (/chat)
+      if (typeof window !== 'undefined') {
+        try {
+          sessionStorage.removeItem('tribbu_pending_user');
+          localStorage.removeItem('tribbu_pending_phone');
+        } catch (_) {}
+        window.history.pushState(null, '', '/chat');
+        window.dispatchEvent(new Event('popstate'));
+        window.dispatchEvent(new CustomEvent('app-route-change', { detail: '/chat' }));
+      }
 
-    } catch (err: any) {
-      console.error('Erro ao salvar onboarding do usuário:', err);
-      setError(err.message || 'Erro ao salvar os dados do perfil. Tente novamente.');
+      if (onComplete) {
+        onComplete(session, idToken);
+      }
+
+      if (onNavigate) {
+        onNavigate('/chat');
+      }
+
+    } catch (err) {
+      console.error('[Cadastro] Erro ao salvar cadastro no Firestore:', err);
+      setError(err?.message || 'Erro ao salvar os dados do perfil. Tente novamente.');
       setIsSubmitting(false);
     }
   };
 
+  const displayPhone = phone || user?.phoneNumber || currentUser?.phoneNumber || '';
+
   return (
     <div className="flex min-h-screen w-screen items-center justify-center bg-slate-950 p-4 selection:bg-cyan-500/20 relative overflow-hidden font-sans">
-      {/* Mesh Gradient Glows */}
+      {/* Mesh Gradient Glows - Fundo Escuro com Detalhes Ciano Neon */}
       <div className="absolute -top-24 -left-24 w-[460px] h-[460px] bg-cyan-500/15 rounded-full blur-[130px] pointer-events-none"></div>
       <div className="absolute -bottom-40 -right-40 w-[500px] h-[500px] bg-emerald-500/15 rounded-full blur-[140px] pointer-events-none"></div>
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-cyan-600/5 rounded-full blur-[150px] pointer-events-none"></div>
@@ -193,9 +219,9 @@ export default function OnboardingScreen({ user, onComplete, onCancel }: Onboard
         animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={{ duration: 0.35, ease: 'easeOut' }}
         className="w-full max-w-[440px] bg-slate-900/85 rounded-3xl border border-cyan-500/25 backdrop-blur-2xl shadow-2xl p-6 sm:p-8 text-white/90 z-10 relative shadow-cyan-950/70"
-        id="onboardingScreen"
+        id="cadastroScreen"
       >
-        {/* Brand Header */}
+        {/* Topo com a Logo Oficial Vertical */}
         <div className="flex flex-col items-center mb-6">
           <div className="w-full max-w-[220px] mx-auto mb-3 flex items-center justify-center">
             <img
@@ -204,29 +230,31 @@ export default function OnboardingScreen({ user, onComplete, onCancel }: Onboard
               className="w-full h-auto max-h-[70px] object-contain drop-shadow-[0_4px_20px_rgba(6,182,212,0.35)]"
               referrerPolicy="no-referrer"
               onError={(e) => {
-                const target = e.target as HTMLImageElement;
-                if (!target.src.includes('/icon/logo_oficial.png')) {
+                const target = e.target;
+                if (target && !target.src.includes('/icon/logo_oficial.png')) {
                   target.src = '/icon/logo_oficial.png';
                 }
               }}
             />
           </div>
 
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-400/30 text-emerald-300 text-xs font-semibold mb-2">
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Número validado por SMS</span>
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-cyan-500/15 border border-cyan-400/30 text-cyan-300 text-xs font-semibold mb-2">
+            <CheckCircle2 className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Criar Perfil na Tribbu</span>
           </div>
 
-          <div className="flex items-center gap-1.5 text-xs text-white/60 font-mono">
-            <Phone className="w-3.5 h-3.5 text-cyan-400" />
-            <span>{user.phoneNumber || 'Número cadastrado'}</span>
-          </div>
+          {displayPhone ? (
+            <div className="flex items-center gap-1.5 text-xs text-white/60 font-mono">
+              <Phone className="w-3.5 h-3.5 text-cyan-400" />
+              <span>{displayPhone}</span>
+            </div>
+          ) : null}
 
-          <h2 className="text-lg font-black text-white mt-3 text-center">
-            Complete seu Cadastro
+          <h2 className="text-xl font-black text-white mt-2 text-center tracking-tight">
+            Cadastro de Perfil
           </h2>
-          <p className="text-xs text-cyan-200/70 text-center mt-0.5">
-            Configure seu perfil para começar a conversar no Tribbu&apos;sChat
+          <p className="text-xs text-cyan-200/70 text-center mt-1">
+            Escolha sua foto e digite seu nome de exibição
           </p>
         </div>
 
@@ -237,15 +265,16 @@ export default function OnboardingScreen({ user, onComplete, onCancel }: Onboard
         )}
 
         <form onSubmit={handleSubmit} className="space-y-5">
-          {/* Avatar & Photo Upload Section */}
+          {/* Botão circular estilizado para upload da Foto de Perfil integrado ao Firebase Storage */}
           <div className="flex flex-col items-center justify-center p-4 rounded-2xl bg-white/[0.03] border border-white/10 space-y-3">
             <div className="relative group">
               {photoURL ? (
-                <div className="w-24 h-24 rounded-full p-[2px] bg-gradient-to-tr from-cyan-400 via-teal-400 to-emerald-400 shadow-[0_0_30px_rgba(6,182,212,0.4)] relative">
+                /* Foto selecionada com borda em degradê ciano/esmeralda */
+                <div className="w-28 h-28 rounded-full p-[2.5px] bg-gradient-to-tr from-cyan-400 via-teal-400 to-emerald-400 shadow-[0_0_30px_rgba(6,182,212,0.4)] relative">
                   <div className="w-full h-full rounded-full overflow-hidden relative">
                     <img
                       src={photoURL}
-                      alt="Foto de perfil"
+                      alt="Foto de perfil selecionada"
                       className="w-full h-full object-cover"
                     />
                     <button
@@ -254,28 +283,34 @@ export default function OnboardingScreen({ user, onComplete, onCancel }: Onboard
                       className="absolute inset-0 bg-slate-950/70 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-red-400 hover:text-red-300 cursor-pointer"
                       title="Remover foto de perfil"
                     >
-                      <Trash2 className="w-6 h-6" />
+                      <Trash2 className="w-7 h-7" />
                     </button>
                   </div>
                 </div>
               ) : (
-                /* Dynamic fallback avatar based on entities.json */
+                /* Botão circular estilizado com regra automática do entities.json gerando as iniciais */
                 <div 
-                  className="w-24 h-24 rounded-full p-[2.5px] bg-gradient-to-tr from-cyan-400 via-teal-400 to-emerald-400 shadow-[0_0_28px_rgba(6,182,212,0.35)] relative cursor-pointer"
+                  id="btnUploadFotoCirculo"
+                  className="w-28 h-28 rounded-full p-[3px] bg-gradient-to-tr from-cyan-400 via-teal-400 to-emerald-400 shadow-[0_0_28px_rgba(6,182,212,0.35)] relative cursor-pointer"
                   onClick={() => fileInputRef.current?.click()}
-                  title="Clique para adicionar uma foto de perfil"
+                  title="Clique para fazer upload da sua foto de perfil"
                 >
                   <div 
                     className="w-full h-full rounded-full flex items-center justify-center text-white font-black text-3xl select-none transition-transform group-hover:scale-105"
                     style={{ backgroundColor: dynamicAvatarColor }}
                   >
-                    {trimmedName ? calculatedInitial : <User className="w-10 h-10 text-white/80" />}
+                    {trimmedName ? calculatedInitial : <User className="w-12 h-12 text-white/80" />}
+                  </div>
+
+                  {/* Badge indicadora de câmera/upload no canto do círculo */}
+                  <div className="absolute bottom-0 right-0 p-2 rounded-full bg-cyan-500 group-hover:bg-cyan-400 text-slate-950 shadow-md transition-transform group-hover:scale-110 flex items-center justify-center border-2 border-slate-900">
+                    <Camera className="w-4 h-4" />
                   </div>
                 </div>
               )}
             </div>
 
-            {/* Photo Action Buttons */}
+            {/* Ações de Foto */}
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -315,19 +350,19 @@ export default function OnboardingScreen({ user, onComplete, onCancel }: Onboard
               />
             </div>
 
-            {/* Hint about automatic avatar generation */}
+            {/* Regra automática do entities.json quando não houver foto */}
             {!photoURL ? (
               <p className="text-[11px] text-cyan-200/70 text-center flex items-center gap-1">
                 <Sparkles className="w-3 h-3 text-cyan-400 flex-shrink-0" />
-                <span>Sem foto? Geramos seu <strong>avatar e cor oficial</strong> automaticamente.</span>
+                <span>Sem foto? As <strong>iniciais e cor oficial</strong> são geradas automaticamente.</span>
               </p>
             ) : (
               <p className="text-[11px] text-emerald-300/80 text-center">
-                ✓ Sua foto será enviada para o Firebase Storage com alta qualidade.
+                ✓ Foto integrada ao Firebase Storage.
               </p>
             )}
 
-            {/* Avatar Color Selector (when no photo is selected) */}
+            {/* Seletor de cores do avatar para o caso sem foto */}
             {!photoURL && (
               <div className="pt-1 flex items-center gap-1.5">
                 <span className="text-[10px] text-white/50 mr-1">Cor do avatar:</span>
@@ -347,7 +382,7 @@ export default function OnboardingScreen({ user, onComplete, onCancel }: Onboard
             )}
           </div>
 
-          {/* Nome de Exibição Input */}
+          {/* Input arredondado para digitar o 'Nome de Exibição' */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <label 
@@ -357,7 +392,7 @@ export default function OnboardingScreen({ user, onComplete, onCancel }: Onboard
               >
                 Nome de Exibição <span className="text-cyan-400">*</span>
               </label>
-              <span className="text-[10px] text-cyan-300/70">Obrigatório</span>
+              <span className="text-[10px] text-cyan-300/70 font-mono">Obrigatório</span>
             </div>
             <div className="relative">
               <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-cyan-400">
@@ -370,24 +405,24 @@ export default function OnboardingScreen({ user, onComplete, onCancel }: Onboard
                 autoFocus
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
-                placeholder="Ex: Carlos Silva ou Nick Design"
+                placeholder="Digite seu Nome de Exibição"
                 maxLength={40}
-                className="w-full pl-10 pr-4 py-2.5 bg-white/5 border border-white/15 rounded-xl text-sm text-white placeholder-white/25 focus:outline-none focus:ring-2 focus:ring-cyan-400/50 focus:border-cyan-400/60 transition-all font-medium"
+                className="w-full pl-10 pr-4 py-3 bg-white/5 border border-white/15 rounded-xl text-sm text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-cyan-400/50 focus:border-cyan-400/60 transition-all font-medium"
               />
             </div>
             <p className="text-[10px] text-white/40">
-              Este é o nome visível nas suas mensagens, grupos e canais da Tribbu.
+              Este é o nome com o qual as pessoas vão te ver na Tribbu.
             </p>
           </div>
 
-          {/* Recado / Bio Input */}
+          {/* Recado Opcional */}
           <div className="space-y-1.5">
             <label 
               id="aboutLabel" 
               htmlFor="aboutInput" 
               className="text-xs font-semibold text-white/70 block"
             >
-              Recado / Sobre você (opcional)
+              Recado / Bio (opcional)
             </label>
             <div className="relative">
               <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-white/40">
@@ -405,9 +440,9 @@ export default function OnboardingScreen({ user, onComplete, onCancel }: Onboard
             </div>
           </div>
 
-          {/* Submit Button */}
+          {/* Botão em degradê ciano escrito 'Entrar na Tribbu' */}
           <button
-            id="btnCompleteOnboarding"
+            id="btnEntrarTribbu"
             type="submit"
             disabled={isSubmitting || !trimmedName}
             className="w-full bg-gradient-to-r from-cyan-400 via-teal-400 to-emerald-400 hover:from-cyan-300 hover:via-teal-300 hover:to-emerald-300 text-slate-950 py-3.5 rounded-xl font-black text-sm tracking-wide shadow-lg shadow-cyan-500/25 transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer mt-2"
@@ -418,24 +453,33 @@ export default function OnboardingScreen({ user, onComplete, onCancel }: Onboard
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                 </svg>
-                <span>Salvando Perfil na Nuvem...</span>
+                <span>Salvando Perfil...</span>
               </>
             ) : (
-              <span>Concluir Cadastro e Entrar no Chat</span>
+              <span>Entrar na Tribbu</span>
             )}
           </button>
 
-          {onCancel && (
-            <div className="text-center pt-1">
-              <button
-                type="button"
-                onClick={onCancel}
-                className="text-xs text-white/40 hover:text-white/80 transition-colors cursor-pointer"
-              >
-                Voltar ou entrar com outro número
-              </button>
-            </div>
-          )}
+          {/* Opção de voltar se necessário */}
+          <div className="text-center pt-1">
+            <button
+              type="button"
+              onClick={() => {
+                if (onCancel) {
+                  onCancel();
+                } else if (onNavigate) {
+                  onNavigate('/login');
+                } else if (typeof window !== 'undefined') {
+                  window.history.pushState(null, '', '/login');
+                  window.location.reload();
+                }
+              }}
+              className="text-xs text-white/40 hover:text-white/80 transition-colors cursor-pointer inline-flex items-center gap-1"
+            >
+              <ArrowLeft className="w-3 h-3" />
+              <span>Voltar para tela de login</span>
+            </button>
+          </div>
         </form>
       </motion.div>
 

@@ -8,12 +8,13 @@ import {
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, getDocs, collection, query, where } from 'firebase/firestore';
 import { auth, db } from '../firebase';
-import { UserSession } from '../types';
-import OnboardingScreen from './OnboardingScreen';
+import { UserSession, isUserProfileComplete } from '../types';
+import Cadastro from './Cadastro.jsx';
 import { useBranding } from '../context/BrandingContext';
 
 interface LoginScreenProps {
   onLoginSuccess: (session: UserSession, token: string) => void;
+  onNavigateToCadastro?: (pendingUser: any) => void;
 }
 
 const AVATAR_COLORS = [
@@ -94,7 +95,7 @@ export function normalizePhoneNumber(raw: string): string {
   return `+${digits}`;
 }
 
-export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
+export default function LoginScreen({ onLoginSuccess, onNavigateToCadastro }: LoginScreenProps) {
   const [countryCode, setCountryCode] = useState('+55');
   const [phoneInput, setPhoneInput] = useState('');
   const [smsCode, setSmsCode] = useState('');
@@ -281,18 +282,35 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         console.warn('Verificação de usuário no Firestore com fallback rápido:', firestoreErr);
       }
 
-      // SE FOR NOVO USUÁRIO (não cadastrado na coleção /users ou sem displayName configurado):
+      // SE FOR NOVO USUÁRIO (não cadastrado na coleção /users ou com perfil incompleto/sem nome definido):
       // Redireciona imediatamente para a tela de cadastro/criação de perfil (/cadastro)
-      if (!existingData || !existingData.displayName) {
+      const isComplete = isUserProfileComplete(existingData);
+      if (!isComplete) {
         setIsLoading(false);
         setSuccess('✓ Número SMS validado com sucesso! Abrindo tela de cadastro...');
-        setPendingOnboardingUser({
+        const pendingUser = {
           uid: fbUser.uid,
           phoneNumber: cleanPhone,
           email: fbUser.email || undefined,
-          displayName: fbUser.displayName || undefined,
-          photoURL: fbUser.photoURL || undefined
-        });
+          displayName: (existingData?.displayName && isUserProfileComplete(existingData)) ? existingData.displayName : undefined,
+          photoURL: existingData?.photoURL || fbUser.photoURL || undefined
+        };
+        try {
+          sessionStorage.setItem('tribbu_pending_user', JSON.stringify(pendingUser));
+          localStorage.setItem('tribbu_pending_phone', cleanPhone);
+        } catch (_) {}
+
+        if (typeof window !== 'undefined') {
+          window.history.pushState(null, '', '/cadastro');
+          window.dispatchEvent(new Event('popstate'));
+          window.dispatchEvent(new CustomEvent('app-route-change', { detail: '/cadastro' }));
+        }
+        // Ativa o estado local para renderização imediata do Cadastro no componente
+        setPendingOnboardingUser(pendingUser);
+        // Notifica o App pai para sincronizar o roteador global
+        if (onNavigateToCadastro) {
+          onNavigateToCadastro(pendingUser);
+        }
         return;
       }
 
@@ -364,13 +382,21 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
     }
   };
 
-  // Se o usuário validou o SMS e é novo, exibe a tela de Onboarding em Dark Mode
+  // Se o usuário validou o SMS e é novo, exibe a tela de Cadastro em Dark Mode
   if (pendingOnboardingUser) {
     return (
-      <OnboardingScreen
+      <Cadastro
         user={pendingOnboardingUser}
-        onComplete={(session, token) => {
+        onComplete={(session: UserSession, token: string) => {
           onLoginSuccess(session, token);
+          if (typeof window !== 'undefined') {
+            window.history.pushState(null, '', '/chat');
+          }
+        }}
+        onNavigate={(path: string) => {
+          if (typeof window !== 'undefined') {
+            window.history.pushState(null, '', path);
+          }
         }}
         onCancel={() => {
           setPendingOnboardingUser(null);
@@ -378,6 +404,9 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           setSmsCode('');
           setError('');
           setSuccess('');
+          if (typeof window !== 'undefined') {
+            window.history.pushState(null, '', '/login');
+          }
         }}
       />
     );

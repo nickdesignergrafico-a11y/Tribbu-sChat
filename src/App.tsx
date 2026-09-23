@@ -14,10 +14,11 @@ import {
   serverTimestamp 
 } from 'firebase/firestore';
 import { auth, db } from './firebase';
-import { Chat, Message, UserSession } from './types';
+import { Chat, Message, UserSession, isUserProfileComplete } from './types';
 import { INITIAL_CHATS, TRIBBU_AI_CHAT, TRIBBU_AI_CHAT_ID } from './initialData';
 import LoginScreen from './components/LoginScreen';
 import SplashScreen from './components/SplashScreen';
+import Cadastro from './components/Cadastro.jsx';
 import Sidebar from './components/Sidebar';
 import ChatArea from './components/ChatArea';
 import JoinGroupModal from './components/JoinGroupModal';
@@ -114,6 +115,53 @@ export default function App() {
   const [isInitializing, setIsInitializing] = useState<boolean>(true);
   const [showSplash, setShowSplash] = useState<boolean>(true);
   const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<any>(null);
+
+  // Routing state supporting /, /chat, /cadastro, and /login
+  const [currentRoute, setCurrentRoute] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const p = window.location.pathname;
+      if (p === '/cadastro' || p === '/chat' || p === '/login') {
+        return p;
+      }
+      return p;
+    }
+    return '/';
+  });
+  const [pendingCadastroUser, setPendingCadastroUser] = useState<any | null>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = sessionStorage.getItem('tribbu_pending_user');
+        if (saved) return JSON.parse(saved);
+      } catch (_) {}
+    }
+    return null;
+  });
+
+  const navigate = (toPath: string) => {
+    if (typeof window !== 'undefined') {
+      if (window.location.pathname !== toPath) {
+        window.history.pushState(null, '', toPath);
+      }
+      window.dispatchEvent(new Event('popstate'));
+      window.dispatchEvent(new CustomEvent('app-route-change', { detail: toPath }));
+      setCurrentRoute(toPath);
+    }
+  };
+
+  // Synchronize route with browser popstate and app-route-change events
+  useEffect(() => {
+    const handlePopState = () => {
+      if (typeof window !== 'undefined') {
+        setCurrentRoute(window.location.pathname);
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    window.addEventListener('app-route-change', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      window.removeEventListener('app-route-change', handlePopState);
+    };
+  }, []);
 
   // Group Invite Link states
   const [pendingInviteCode, setPendingInviteCode] = useState<string | null>(null);
@@ -254,7 +302,7 @@ export default function App() {
     activeChatIdRef.current = activeChatId;
   }, [activeChatId]);
 
-  // 1. Firebase Authentication Listener (Handles login persistence automatically)
+  // 1. Firebase Authentication Listener (Handles login persistence & /cadastro flow)
   useEffect(() => {
     let userProfileUnsubscribe: (() => void) | null = null;
 
@@ -265,61 +313,63 @@ export default function App() {
       }
 
       if (fbUser) {
-        // Fast local recovery first so the UI responds instantaneously even when offline
         let existingSession: UserSession | null = null;
         try {
           const cached = localStorage.getItem('zapchat_user');
           if (cached) {
             const parsed = JSON.parse(cached);
-            if (parsed && (parsed.uid === fbUser.uid || parsed.email === fbUser.email)) {
+            if (parsed && (parsed.uid === fbUser.uid || parsed.email === fbUser.email) && isUserProfileComplete(parsed)) {
               existingSession = parsed;
               setUser(parsed);
+            } else {
+              // Limpa cache que continha apenas número de telefone ou perfil incompleto
+              localStorage.removeItem('zapchat_user');
             }
           }
         } catch (_) {}
 
-        if (!existingSession) {
-          const derivedPhone = fbUser.phoneNumber || (fbUser.email?.includes('@zapchat.phone') ? ('+' + fbUser.email.replace('@zapchat.phone', '')) : undefined) || '+5511999999999';
-          const resolvedName = fbUser.displayName || derivedPhone;
-          const initial = resolvedName.charAt(0).toUpperCase() || 'U';
-          const defaultSession: UserSession = {
-            uid: fbUser.uid,
-            phoneNumber: derivedPhone,
-            displayName: resolvedName,
-            email: fbUser.email || undefined,
-            initial,
-            avatarColor: '#06B6D4',
-            photoURL: fbUser.photoURL || undefined
-          };
-          setUser(defaultSession);
-          try {
-            localStorage.setItem('zapchat_user', JSON.stringify(defaultSession));
-          } catch (_) {}
-        }
-
-        // Synchronize Firestore user profile via onSnapshot (resilient to offline/network initialization)
+        // Listen to Firestore doc /users/{uid} in real-time
         try {
           const userDocRef = doc(db, 'users', fbUser.uid);
           userProfileUnsubscribe = onSnapshot(
             userDocRef,
             (docSnap) => {
-              if (docSnap.exists()) {
-                const data = docSnap.data();
-                const phone = data.phoneNumber || fbUser.phoneNumber || (fbUser.email?.includes('@zapchat.phone') ? ('+' + fbUser.email.replace('@zapchat.phone', '')) : undefined) || '+5511999999999';
-                const name = data.displayName || fbUser.displayName || phone;
+              const data = docSnap.exists() ? docSnap.data() : null;
+              if (docSnap.exists() && isUserProfileComplete(data)) {
+                const phone = data?.phoneNumber || fbUser.phoneNumber || (fbUser.email?.includes('@zapchat.phone') ? ('+' + fbUser.email.replace('@zapchat.phone', '')) : undefined) || '+5511999999999';
+                const name = data?.displayName;
                 const session: UserSession = {
                   uid: fbUser.uid,
                   phoneNumber: phone,
                   displayName: name,
-                  email: data.email || fbUser.email || undefined,
-                  initial: data.initial || name.charAt(0).toUpperCase() || 'U',
-                  avatarColor: data.avatarColor || '#06B6D4',
-                  photoURL: data.photoURL || fbUser.photoURL || undefined
+                  email: data?.email || fbUser.email || undefined,
+                  initial: data?.initial || name.charAt(0).toUpperCase() || 'U',
+                  avatarColor: data?.avatarColor || '#06B6D4',
+                  photoURL: data?.photoURL || fbUser.photoURL || undefined,
+                  profileCompleted: true
                 };
                 setUser(session);
+                setPendingCadastroUser(null);
                 try {
                   localStorage.setItem('zapchat_user', JSON.stringify(session));
                 } catch (_) {}
+
+                if (window.location.pathname === '/login') {
+                  navigate('/chat');
+                }
+              } else {
+                // Usuário não possui perfil completo cadastrado na coleção /users! Direciona para /cadastro
+                const derivedPhone = fbUser.phoneNumber || (fbUser.email?.includes('@zapchat.phone') ? ('+' + fbUser.email.replace('@zapchat.phone', '')) : undefined) || '';
+                const pending = {
+                  uid: fbUser.uid,
+                  phoneNumber: derivedPhone,
+                  email: fbUser.email || undefined,
+                  displayName: (data?.displayName && isUserProfileComplete(data)) ? data.displayName : undefined,
+                  photoURL: data?.photoURL || fbUser.photoURL || undefined
+                };
+                setUser(null);
+                setPendingCadastroUser(pending);
+                navigate('/cadastro');
               }
             },
             () => {
@@ -331,6 +381,7 @@ export default function App() {
         }
       } else {
         setUser(null);
+        setPendingCadastroUser(null);
         localStorage.removeItem('zapchat_user');
         localStorage.removeItem('zapchat_token');
       }
@@ -631,10 +682,12 @@ export default function App() {
 
   const handleLoginSuccess = (session: UserSession, token: string) => {
     setUser(session);
+    setPendingCadastroUser(null);
     localStorage.setItem('zapchat_user', JSON.stringify(session));
     localStorage.setItem('zapchat_token', token);
     setActiveChatId(TRIBBU_AI_CHAT_ID);
     setMobileShowChat(false);
+    navigate('/chat');
   };
 
   const handleLogout = async () => {
@@ -647,8 +700,10 @@ export default function App() {
     setChats([]);
     setActiveChatId(null);
     setMobileShowChat(false);
+    setPendingCadastroUser(null);
     localStorage.removeItem('zapchat_user');
     localStorage.removeItem('zapchat_token');
+    navigate('/login');
   };
 
   const getFormattedTime = () => {
@@ -1287,6 +1342,30 @@ export default function App() {
 
   const activeChat = chats.find(c => c.id === activeChatId) || null;
 
+  // ROTA /cadastro: Aponta diretamente para Cadastro.jsx
+  // ACESSO 100% LIVRE - Removido qualquer bloqueio ou 'Mecanismo de Rota Protegida'
+  const isCadastroRoute = currentRoute === '/cadastro' || 
+                          (typeof window !== 'undefined' && window.location.pathname === '/cadastro') ||
+                          Boolean(pendingCadastroUser && !user) ||
+                          Boolean(user && !isUserProfileComplete(user) && currentRoute !== '/login');
+
+  if (isCadastroRoute) {
+    return (
+      <Cadastro
+        user={pendingCadastroUser || user || auth.currentUser}
+        onComplete={(session: UserSession, idToken: string) => {
+          handleLoginSuccess(session, idToken);
+          navigate('/chat');
+        }}
+        onNavigate={navigate}
+        onCancel={() => {
+          setPendingCadastroUser(null);
+          navigate('/login');
+        }}
+      />
+    );
+  }
+
   // Professional 2-second Splash Screen on app launch / startup
   if (showSplash || isInitializing) {
     return (
@@ -1299,9 +1378,17 @@ export default function App() {
     );
   }
 
-  // Render Login/Register page if user session is absent
-  if (!user) {
-    return <LoginScreen onLoginSuccess={handleLoginSuccess} />;
+  // Render Login page if user session is absent or if on /login route
+  if (!user || currentRoute === '/login') {
+    return (
+      <LoginScreen 
+        onLoginSuccess={handleLoginSuccess} 
+        onNavigateToCadastro={(pending) => {
+          setPendingCadastroUser(pending);
+          navigate('/cadastro');
+        }}
+      />
+    );
   }
 
   return (

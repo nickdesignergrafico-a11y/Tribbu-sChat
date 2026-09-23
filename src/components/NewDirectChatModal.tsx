@@ -16,6 +16,7 @@ import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { UserSession } from '../types';
 import { formatPhoneDisplay, normalizePhoneNumber } from './LoginScreen';
+import { TribbuBalloonIcon } from './Contatos.jsx';
 
 interface NewDirectChatModalProps {
   isOpen: boolean;
@@ -350,8 +351,9 @@ export default function NewDirectChatModal({
                   </div>
 
                   <div className="flex-1 min-w-0">
-                    <h4 className="font-bold text-base text-white truncate">
-                      {foundUser.displayName}
+                    <h4 className="font-bold text-base text-white truncate flex items-center gap-1.5">
+                      <span>{foundUser.displayName}</span>
+                      <TribbuBalloonIcon className="w-5 h-5 sm:w-6 sm:h-6 text-cyan-400 drop-shadow-[0_0_6px_rgba(6,182,212,0.85)] flex-shrink-0" />
                     </h4>
                     <p className="text-xs font-mono text-cyan-300/80">
                       {formatPhoneDisplay(foundUser.phoneNumber)}
@@ -433,8 +435,9 @@ export default function NewDirectChatModal({
                           )}
                         </div>
                         <div className="min-w-0">
-                          <p className="text-xs font-semibold text-white group-hover:text-cyan-300 transition-colors truncate">
-                            {u.displayName}
+                          <p className="text-xs font-semibold text-white group-hover:text-cyan-300 transition-colors truncate flex items-center gap-1.5">
+                            <span>{u.displayName}</span>
+                            <TribbuBalloonIcon className="w-5 h-5 text-cyan-400 drop-shadow-[0_0_6px_rgba(6,182,212,0.85)] flex-shrink-0" />
                           </p>
                           <p className="text-[10px] font-mono text-white/40 truncate">
                             {formatPhoneDisplay(u.phoneNumber)}

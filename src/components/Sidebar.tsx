@@ -23,7 +23,8 @@ import {
   Type,
   Megaphone,
   UserPlus,
-  Shield
+  Shield,
+  Contact
 } from 'lucide-react';
 import { Chat, UserSession, StatusItem, UserStatusGroup, TextStatusStyle } from '../types';
 import CameraCaptureModal from './CameraCaptureModal';
@@ -33,6 +34,7 @@ import { StatusViewerModal } from './StatusViewerModal';
 import { NewStatusModal } from './NewStatusModal';
 import NewDirectChatModal from './NewDirectChatModal';
 import NewTribbuModal from './NewTribbuModal';
+import Contatos, { TribbuBalloonIcon } from './Contatos.jsx';
 import { subscribeToStatuses, groupStatusesByUser, publishStatus, publishTextStatus } from '../services/statusService';
 import { useBranding } from '../context/BrandingContext';
 
@@ -85,6 +87,7 @@ export default function Sidebar({
   const [showMenu, setShowMenu] = useState(false);
   const [showNewChatModal, setShowNewChatModal] = useState(false);
   const [showNewDirectChatModal, setShowNewDirectChatModal] = useState(false);
+  const [showContatosModal, setShowContatosModal] = useState(false);
   const [showNewTribbuModal, setShowNewTribbuModal] = useState(false);
   const [showCommunityModal, setShowCommunityModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -338,8 +341,8 @@ export default function Sidebar({
               referrerPolicy="no-referrer"
               onError={(e) => {
                 const target = e.target as HTMLImageElement;
-                if (!target.src.includes('/tribbus-logo.png')) {
-                  target.src = '/tribbus-logo.png';
+                if (!target.src.includes('/icon/logo_oficial.png')) {
+                  target.src = '/icon/logo_oficial.png';
                 }
               }}
             />
@@ -432,6 +435,19 @@ export default function Sidebar({
                   >
                     <UserPlus className="w-4 h-4 text-cyan-400" />
                     Nova conversa individual
+                  </button>
+
+                  {/* Lista de Contatos da Tribbu com Cruzamento de Dados */}
+                  <button
+                    onClick={() => {
+                      setShowMenu(false);
+                      setShowContatosModal(true);
+                    }}
+                    className="w-full text-left px-4 py-2.5 hover:bg-white/10 flex items-center gap-3 cursor-pointer text-white/90 hover:text-white font-medium"
+                    id="menuContatosBtn"
+                  >
+                    <Contact className="w-4 h-4 text-cyan-400" />
+                    Contatos da Tribbu
                   </button>
 
                   {/* Nova Tribbu */}
@@ -841,6 +857,9 @@ export default function Sidebar({
                                     <span className={`font-bold text-[14px] sm:text-[15px] truncate ${isActive ? 'text-cyan-200' : 'text-white'}`}>
                                       {chat.name}
                                     </span>
+                                    {!chat.isGroup && !chat.isAI && chat.id !== 'tribbu-ai' && (
+                                      <TribbuBalloonIcon className="w-5 h-5 text-cyan-400 drop-shadow-[0_0_6px_rgba(6,182,212,0.85)] flex-shrink-0" />
+                                    )}
                                     {(chat.isAI || chat.id === 'tribbu-ai') && (
                                       <span className="bg-cyan-500/20 text-cyan-300 text-[10px] font-bold px-1.5 py-0.5 rounded-full border border-cyan-500/40 tracking-wider flex items-center gap-0.5 flex-shrink-0 shadow-sm shadow-cyan-500/20">
                                         <Sparkles className="w-2.5 h-2.5 text-cyan-400 animate-pulse" />
@@ -1428,8 +1447,8 @@ export default function Sidebar({
                 referrerPolicy="no-referrer"
                 onError={(e) => {
                   const target = e.target as HTMLImageElement;
-                  if (!target.src.includes('/tribbus-logo.png')) {
-                    target.src = '/tribbus-logo.png';
+                  if (!target.src.includes('/icon/logo_oficial.png')) {
+                    target.src = '/icon/logo_oficial.png';
                   }
                 }}
               />
@@ -1489,6 +1508,15 @@ export default function Sidebar({
         onClose={() => setShowNewDirectChatModal(false)}
         currentUser={user}
         onStartDirectChat={handleStartDirectChat}
+      />
+
+      {/* Modal - Lista de Contatos com Cruzamento de Dados e Ícone Tribbu */}
+      <Contatos
+        isOpen={showContatosModal}
+        onClose={() => setShowContatosModal(false)}
+        currentUser={user}
+        onStartDirectChat={handleStartDirectChat}
+        onSelectContact={handleStartDirectChat}
       />
 
       {/* Modal - Nova Tribbu (Criação de grupo com upload de foto e membros) */}
