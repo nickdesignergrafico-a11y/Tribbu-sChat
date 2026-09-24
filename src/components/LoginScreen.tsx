@@ -11,6 +11,7 @@ import { auth, db } from '../firebase';
 import { UserSession, isUserProfileComplete } from '../types';
 import Cadastro from './Cadastro.jsx';
 import { useBranding } from '../context/BrandingContext';
+import { navigate, useNavigate } from '../utils/navigation';
 
 interface LoginScreenProps {
   onLoginSuccess: (session: UserSession, token: string) => void;
@@ -96,6 +97,7 @@ export function normalizePhoneNumber(raw: string): string {
 }
 
 export default function LoginScreen({ onLoginSuccess, onNavigateToCadastro }: LoginScreenProps) {
+  const navigate = useNavigate();
   const [countryCode, setCountryCode] = useState('+55');
   const [phoneInput, setPhoneInput] = useState('');
   const [smsCode, setSmsCode] = useState('');
@@ -183,8 +185,8 @@ export default function LoginScreen({ onLoginSuccess, onNavigateToCadastro }: Lo
         } catch (_) {}
       }
 
-      // Configura o verificador reCAPTCHA invisível vinculado ao botão de login
-      recaptchaVerifierRef.current = new RecaptchaVerifier(auth, 'sign-in-button', {
+      // Configura o verificador reCAPTCHA invisível no container dedicado para não interceptar cliques do botão de confirmação
+      recaptchaVerifierRef.current = new RecaptchaVerifier(auth, 'recaptcha-container', {
         size: 'invisible',
         callback: () => {
           // reCAPTCHA resolvido com sucesso
@@ -199,6 +201,15 @@ export default function LoginScreen({ onLoginSuccess, onNavigateToCadastro }: Lo
       confirmationResultRef.current = confirmation;
       setIsCodeSent(true);
       setSuccess(`Código SMS enviado para ${cleanPhone}! Digite o código de 6 números abaixo.`);
+
+      // Limpa o verificador reCAPTCHA para desvincular qualquer listener de clique,
+      // garantindo que o clique para validar o código execute direto a validação
+      if (recaptchaVerifierRef.current) {
+        try {
+          recaptchaVerifierRef.current.clear();
+          recaptchaVerifierRef.current = null;
+        } catch (_) {}
+      }
     } catch (err: any) {
       console.error('Erro no signInWithPhoneNumber do Firebase:', err);
       // Limpa o verificador em caso de falha para permitir nova tentativa
@@ -209,7 +220,10 @@ export default function LoginScreen({ onLoginSuccess, onNavigateToCadastro }: Lo
         } catch (_) {}
       }
 
-      if (err.code === 'auth/invalid-phone-number') {
+      if (err.code === 'auth/unauthorized-domain') {
+        const host = typeof window !== 'undefined' ? window.location.hostname : 'Netlify';
+        setError(`Domínio "${host}" não está autorizado no Firebase! Acesse o Firebase Console (Projeto zapchat-b635d) > Authentication > Settings > Authorized domains e adicione "${host}".`);
+      } else if (err.code === 'auth/invalid-phone-number') {
         setError('Número de telefone inválido no formato internacional. Verifique o código do país e o número digitado.');
       } else if (err.code === 'auth/quota-exceeded') {
         setError('Limite de envio de SMS atingido temporariamente. Aguarde alguns minutos e tente novamente.');
@@ -253,38 +267,35 @@ export default function LoginScreen({ onLoginSuccess, onNavigateToCadastro }: Lo
         throw new Error('Falha ao autenticar usuário com o código fornecido.');
       }
 
-      // Consulta protegida com timeout na coleção /users do Firestore para saber se já é cadastrado
+      // Busca rápida na coleção /users do Firestore para checar se o número de telefone já existe
       let existingData: any = null;
-      try {
-        const fetchUserData = async () => {
-          const userDocRef = doc(db, 'users', fbUser.uid);
-          const existingDoc = await getDoc(userDocRef);
-          if (existingDoc.exists()) {
-            return existingDoc.data();
-          }
+      let userExistsInDb = false;
 
-          // Se não encontrou pelo UID direto, tenta busca por número de telefone
+      try {
+        const userDocRef = doc(db, 'users', fbUser.uid);
+        const existingDoc = await getDoc(userDocRef);
+        if (existingDoc.exists()) {
+          existingData = existingDoc.data();
+          userExistsInDb = true;
+        } else {
+          // Se não encontrou pelo UID direto, tenta busca rápida por número de telefone
           try {
             const q = query(collection(db, 'users'), where('phoneNumber', '==', cleanPhone));
             const snap = await getDocs(q);
             if (!snap.empty) {
-              return snap.docs[0].data();
+              existingData = snap.docs[0].data();
+              userExistsInDb = true;
             }
           } catch (_) {}
-
-          return null;
-        };
-
-        // Timeout seguro de 3.5 segundos para garantir que o usuário nunca fique travado
-        const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3500));
-        existingData = await Promise.race([fetchUserData(), timeoutPromise]);
+        }
       } catch (firestoreErr) {
-        console.warn('Verificação de usuário no Firestore com fallback rápido:', firestoreErr);
+        console.warn('Verificação de usuário no Firestore:', firestoreErr);
       }
 
-      // SE FOR NOVO USUÁRIO (não cadastrado na coleção /users ou com perfil incompleto/sem nome definido):
-      // Redireciona imediatamente para a tela de cadastro/criação de perfil (/cadastro)
-      const isComplete = isUserProfileComplete(existingData);
+      const isComplete = userExistsInDb && isUserProfileComplete(existingData);
+
+      // SE O NÚMERO FOR NOVO (NÃO EXISTIR NA COLEÇÃO):
+      // Execute imediatamente o comando: navigate('/cadastro')
       if (!isComplete) {
         setIsLoading(false);
         setSuccess('✓ Número SMS validado com sucesso! Abrindo tela de cadastro...');
@@ -292,7 +303,7 @@ export default function LoginScreen({ onLoginSuccess, onNavigateToCadastro }: Lo
           uid: fbUser.uid,
           phoneNumber: cleanPhone,
           email: fbUser.email || undefined,
-          displayName: (existingData?.displayName && isUserProfileComplete(existingData)) ? existingData.displayName : undefined,
+          displayName: existingData?.displayName || undefined,
           photoURL: existingData?.photoURL || fbUser.photoURL || undefined
         };
         try {
@@ -300,22 +311,21 @@ export default function LoginScreen({ onLoginSuccess, onNavigateToCadastro }: Lo
           localStorage.setItem('tribbu_pending_phone', cleanPhone);
         } catch (_) {}
 
-        if (typeof window !== 'undefined') {
-          window.history.pushState(null, '', '/cadastro');
-          window.dispatchEvent(new Event('popstate'));
-          window.dispatchEvent(new CustomEvent('app-route-change', { detail: '/cadastro' }));
-        }
-        // Ativa o estado local para renderização imediata do Cadastro no componente
+        // Ativa imediatamente a renderização local da tela de Cadastro no LoginScreen
         setPendingOnboardingUser(pendingUser);
-        // Notifica o App pai para sincronizar o roteador global
+
+        // Notifica o App pai para sincronizar o roteador global de forma limpa
         if (onNavigateToCadastro) {
           onNavigateToCadastro(pendingUser);
         }
+
+        // Se o número for novo (não existir na coleção), execute imediatamente o comando: navigate('/cadastro')
+        await navigate('/cadastro');
         return;
       }
 
-      // USUÁRIO EXISTENTE:
-      // Já possui cadastro na coleção /users, redireciona imediatamente para a tela principal do chat (/chat)
+      // SE O NÚMERO DE TELEFONE JÁ EXISTIR NO BANCO DE DADOS:
+      // Execute imediatamente o comando: navigate('/chat')
       const resolvedDisplayName = existingData.displayName;
       const initial = existingData.initial || (resolvedDisplayName.charAt(0).toUpperCase() || 'U');
       const avatarColor = existingData.avatarColor || AVATAR_COLORS[0];
@@ -356,12 +366,21 @@ export default function LoginScreen({ onLoginSuccess, onNavigateToCadastro }: Lo
       // Finaliza o loading imediatamente e executa o redirecionamento para o chat principal
       setIsLoading(false);
       setSuccess(`✓ Código validado! Bem-vindo, ${resolvedDisplayName}!`);
-      onLoginSuccess(session, idToken);
+      
+      if (onLoginSuccess) {
+        onLoginSuccess(session, idToken);
+      }
+
+      // Se o número de telefone já existir no banco de dados, execute imediatamente o comando: navigate('/chat')
+      await navigate('/chat');
       return;
 
     } catch (err: any) {
       console.error('Erro ao validar código SMS:', err);
-      if (err.code === 'auth/invalid-verification-code') {
+      if (err.code === 'auth/unauthorized-domain') {
+        const host = typeof window !== 'undefined' ? window.location.hostname : 'Netlify';
+        setError(`Domínio "${host}" não está autorizado no Firebase! Adicione "${host}" em Firebase Console > Authentication > Settings > Authorized domains.`);
+      } else if (err.code === 'auth/invalid-verification-code') {
         setError('Código SMS incorreto. Verifique os 6 números recebidos no seu celular.');
       } else if (err.code === 'auth/code-expired') {
         setError('O código SMS expirou. Clique em reenviar para receber um novo código.');
@@ -388,15 +407,13 @@ export default function LoginScreen({ onLoginSuccess, onNavigateToCadastro }: Lo
       <Cadastro
         user={pendingOnboardingUser}
         onComplete={(session: UserSession, token: string) => {
-          onLoginSuccess(session, token);
-          if (typeof window !== 'undefined') {
-            window.history.pushState(null, '', '/chat');
+          if (onLoginSuccess) {
+            onLoginSuccess(session, token);
           }
+          navigate('/chat');
         }}
         onNavigate={(path: string) => {
-          if (typeof window !== 'undefined') {
-            window.history.pushState(null, '', path);
-          }
+          navigate(path);
         }}
         onCancel={() => {
           setPendingOnboardingUser(null);
@@ -404,9 +421,7 @@ export default function LoginScreen({ onLoginSuccess, onNavigateToCadastro }: Lo
           setSmsCode('');
           setError('');
           setSuccess('');
-          if (typeof window !== 'undefined') {
-            window.history.pushState(null, '', '/login');
-          }
+          navigate('/login');
         }}
       />
     );
@@ -593,6 +608,12 @@ export default function LoginScreen({ onLoginSuccess, onNavigateToCadastro }: Lo
             id="sign-in-button"
             type="submit"
             disabled={isLoading}
+            onClick={(e) => {
+              if (isCodeSent && !isLoading) {
+                e.preventDefault();
+                handleVerifyCode();
+              }
+            }}
             className="w-full bg-gradient-to-r from-cyan-400 via-teal-400 to-emerald-400 hover:from-cyan-300 hover:via-teal-300 hover:to-emerald-300 text-slate-950 py-3 rounded-xl font-black text-sm tracking-wide shadow-lg shadow-cyan-500/25 transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-70 flex items-center justify-center gap-2 cursor-pointer mt-2"
           >
             {isLoading ? (

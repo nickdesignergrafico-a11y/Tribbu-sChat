@@ -44,9 +44,9 @@ export function TribbuBalloonIcon({ className = "w-5 h-5", title = "Usuário cad
       viewBox="0 0 24 24" 
       fill="none" 
       xmlns="http://www.w3.org/2000/svg"
-      title={title}
       aria-label={title}
     >
+      <title>{title}</title>
       <defs>
         <linearGradient id="tribbuBalloonGrad" x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse">
           <stop offset="0%" stopColor="#22D3EE" />
@@ -124,12 +124,21 @@ const DEFAULT_LOCAL_CONTACTS = [
   { id: 'c5', name: 'Gabriel Santos', phone: '+5541955554444', note: 'Marketing' }
 ];
 
+/**
+ * @param {{
+ *   isOpen?: boolean,
+ *   onClose?: () => void,
+ *   currentUser?: any,
+ *   onSelectContact?: (contact: any) => void,
+ *   onStartDirectChat?: (contact: any) => void
+ * }} props
+ */
 export default function Contatos({
   isOpen = true,
-  onClose = undefined,
-  currentUser = null,
-  onSelectContact = undefined,
-  onStartDirectChat = undefined
+  onClose,
+  currentUser,
+  onSelectContact,
+  onStartDirectChat
 }) {
   const { logoUrl } = useBranding();
 
@@ -651,12 +660,12 @@ export default function Contatos({
                         {profile?.displayName || contact.name}
                       </h4>
 
-                      {/* Se o número de telefone já estiver cadastrado no banco de dados, renderize uma tag <img> com a nossa imagem /icon/ic_tribbus.png bem ao lado do nome do usuário. Se o número não existir no banco, não mostre o ícone. */}
+                      {/* Se o número de telefone já existir cadastrado no banco, renderize uma tag <img> apontando para o nosso ícone customizado de verificação no caminho /icon/ic_tribbus.png (ajustado para tamanho pequeno) bem ao lado do nome do usuário. Se o número não existir, não exiba o ícone. */}
                       {isTribbu && (
                         <img 
                           src="/icon/ic_tribbus.png" 
                           alt="Tribbu'sChat" 
-                          className="w-5 h-5 sm:w-6 sm:h-6 object-contain drop-shadow-[0_0_8px_rgba(6,182,212,0.85)] flex-shrink-0 select-none"
+                          className="w-4 h-4 sm:w-4.5 sm:h-4.5 object-contain drop-shadow-[0_0_8px_rgba(6,182,212,0.85)] flex-shrink-0 select-none inline-block align-middle ml-1"
                           title="Usuário cadastrado no Tribbu'sChat"
                           onError={(e) => {
                             const target = e.currentTarget;

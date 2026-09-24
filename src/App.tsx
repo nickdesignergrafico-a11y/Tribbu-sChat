@@ -16,13 +16,11 @@ import {
 import { auth, db } from './firebase';
 import { Chat, Message, UserSession, isUserProfileComplete } from './types';
 import { INITIAL_CHATS, TRIBBU_AI_CHAT, TRIBBU_AI_CHAT_ID } from './initialData';
-import LoginScreen from './components/LoginScreen';
-import SplashScreen from './components/SplashScreen';
-import Cadastro from './components/Cadastro.jsx';
 import Sidebar from './components/Sidebar';
 import ChatArea from './components/ChatArea';
 import JoinGroupModal from './components/JoinGroupModal';
 import { uploadProfilePhoto } from './services/storageService';
+import { navigate } from './utils/navigation';
 
 // Helper to strictly ensure Tribbu AI is always permanently available in the chat list
 function ensureTribbuAIPresent(chatList: Chat[]): Chat[] {
@@ -85,8 +83,32 @@ function deduplicateMessages(messages: Message[]): Message[] {
   return result.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
 }
 
-export default function App() {
-  const [user, setUser] = useState<UserSession | null>(null);
+interface MainChatAppProps {
+  userSession?: UserSession | null;
+  onLogout?: () => void;
+}
+
+export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
+  const [user, setUser] = useState<UserSession | null>(() => {
+    if (userSession && isUserProfileComplete(userSession)) return userSession;
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem('zapchat_user');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed && isUserProfileComplete(parsed)) return parsed;
+        }
+      } catch (_) {}
+    }
+    return null;
+  });
+
+  useEffect(() => {
+    if (userSession && isUserProfileComplete(userSession)) {
+      setUser(userSession);
+    }
+  }, [userSession]);
+
   const [chats, setChats] = useState<Chat[]>(() => {
     if (typeof window !== 'undefined') {
       try {
@@ -112,56 +134,8 @@ export default function App() {
   });
   const [activeChatId, setActiveChatId] = useState<string | null>(TRIBBU_AI_CHAT_ID);
   const [mobileShowChat, setMobileShowChat] = useState<boolean>(false);
-  const [isInitializing, setIsInitializing] = useState<boolean>(true);
-  const [showSplash, setShowSplash] = useState<boolean>(true);
+  const [isInitializing, setIsInitializing] = useState<boolean>(false);
   const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<any>(null);
-
-  // Routing state supporting /, /chat, /cadastro, and /login
-  const [currentRoute, setCurrentRoute] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      const p = window.location.pathname;
-      if (p === '/cadastro' || p === '/chat' || p === '/login') {
-        return p;
-      }
-      return p;
-    }
-    return '/';
-  });
-  const [pendingCadastroUser, setPendingCadastroUser] = useState<any | null>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = sessionStorage.getItem('tribbu_pending_user');
-        if (saved) return JSON.parse(saved);
-      } catch (_) {}
-    }
-    return null;
-  });
-
-  const navigate = (toPath: string) => {
-    if (typeof window !== 'undefined') {
-      if (window.location.pathname !== toPath) {
-        window.history.pushState(null, '', toPath);
-      }
-      window.dispatchEvent(new Event('popstate'));
-      window.dispatchEvent(new CustomEvent('app-route-change', { detail: toPath }));
-      setCurrentRoute(toPath);
-    }
-  };
-
-  // Synchronize route with browser popstate and app-route-change events
-  useEffect(() => {
-    const handlePopState = () => {
-      if (typeof window !== 'undefined') {
-        setCurrentRoute(window.location.pathname);
-      }
-    };
-    window.addEventListener('popstate', handlePopState);
-    window.addEventListener('app-route-change', handlePopState);
-    return () => {
-      window.removeEventListener('popstate', handlePopState);
-      window.removeEventListener('app-route-change', handlePopState);
-    };
-  }, []);
 
   // Group Invite Link states
   const [pendingInviteCode, setPendingInviteCode] = useState<string | null>(null);
@@ -349,7 +323,6 @@ export default function App() {
                   profileCompleted: true
                 };
                 setUser(session);
-                setPendingCadastroUser(null);
                 try {
                   localStorage.setItem('zapchat_user', JSON.stringify(session));
                 } catch (_) {}
@@ -358,32 +331,19 @@ export default function App() {
                   navigate('/chat');
                 }
               } else {
-                // Usuário não possui perfil completo cadastrado na coleção /users! Direciona para /cadastro
-                const derivedPhone = fbUser.phoneNumber || (fbUser.email?.includes('@zapchat.phone') ? ('+' + fbUser.email.replace('@zapchat.phone', '')) : undefined) || '';
-                const pending = {
-                  uid: fbUser.uid,
-                  phoneNumber: derivedPhone,
-                  email: fbUser.email || undefined,
-                  displayName: (data?.displayName && isUserProfileComplete(data)) ? data.displayName : undefined,
-                  photoURL: data?.photoURL || fbUser.photoURL || undefined
-                };
+                // Perfil pendente na coleção /users: a coordenação de rotas é tratada pelo App.jsx
                 setUser(null);
-                setPendingCadastroUser(pending);
-                navigate('/cadastro');
               }
             },
             () => {
-              // Handled silently when offline or initializing
+              // Silencioso em caso de offline
             }
           );
         } catch {
-          // Handled silently
+          // Silencioso
         }
       } else {
         setUser(null);
-        setPendingCadastroUser(null);
-        localStorage.removeItem('zapchat_user');
-        localStorage.removeItem('zapchat_token');
       }
       setIsInitializing(false);
     });
@@ -682,7 +642,6 @@ export default function App() {
 
   const handleLoginSuccess = (session: UserSession, token: string) => {
     setUser(session);
-    setPendingCadastroUser(null);
     localStorage.setItem('zapchat_user', JSON.stringify(session));
     localStorage.setItem('zapchat_token', token);
     setActiveChatId(TRIBBU_AI_CHAT_ID);
@@ -700,10 +659,12 @@ export default function App() {
     setChats([]);
     setActiveChatId(null);
     setMobileShowChat(false);
-    setPendingCadastroUser(null);
     localStorage.removeItem('zapchat_user');
     localStorage.removeItem('zapchat_token');
-    navigate('/login');
+    if (onLogout) {
+      onLogout();
+    }
+    await navigate('/login');
   };
 
   const getFormattedTime = () => {
@@ -955,7 +916,7 @@ export default function App() {
     }
   };
 
-  const handleSendAttachment = (type: 'image' | 'document' | 'location' | 'contact') => {
+  const handleSendAttachment = (type: 'image' | 'document' | 'location' | 'contact' | 'video') => {
     if (!activeChatId) return;
 
     if (type === 'location') {
@@ -1342,52 +1303,14 @@ export default function App() {
 
   const activeChat = chats.find(c => c.id === activeChatId) || null;
 
-  // ROTA /cadastro: Aponta diretamente para Cadastro.jsx
-  // ACESSO 100% LIVRE - Removido qualquer bloqueio ou 'Mecanismo de Rota Protegida'
-  const isCadastroRoute = currentRoute === '/cadastro' || 
-                          (typeof window !== 'undefined' && window.location.pathname === '/cadastro') ||
-                          Boolean(pendingCadastroUser && !user) ||
-                          Boolean(user && !isUserProfileComplete(user) && currentRoute !== '/login');
-
-  if (isCadastroRoute) {
+  if (!user) {
     return (
-      <Cadastro
-        user={pendingCadastroUser || user || auth.currentUser}
-        onComplete={(session: UserSession, idToken: string) => {
-          handleLoginSuccess(session, idToken);
-          navigate('/chat');
-        }}
-        onNavigate={navigate}
-        onCancel={() => {
-          setPendingCadastroUser(null);
-          navigate('/login');
-        }}
-      />
-    );
-  }
-
-  // Professional 2-second Splash Screen on app launch / startup
-  if (showSplash || isInitializing) {
-    return (
-      <SplashScreen 
-        durationMs={2000}
-        onComplete={() => {
-          setShowSplash(false);
-        }} 
-      />
-    );
-  }
-
-  // Render Login page if user session is absent or if on /login route
-  if (!user || currentRoute === '/login') {
-    return (
-      <LoginScreen 
-        onLoginSuccess={handleLoginSuccess} 
-        onNavigateToCadastro={(pending) => {
-          setPendingCadastroUser(pending);
-          navigate('/cadastro');
-        }}
-      />
+      <div className="flex h-screen w-screen items-center justify-center bg-slate-950 font-sans antialiased text-white select-none">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-10 h-10 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin" />
+          <p className="text-xs text-white/60 font-medium tracking-wide">Carregando conversas...</p>
+        </div>
+      </div>
     );
   }
 

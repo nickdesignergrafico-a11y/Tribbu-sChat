@@ -12,7 +12,7 @@ export const firebaseConfig = {
   storageBucket: "zapchat-b635d.firebasestorage.app",
   messagingSenderId: "407322219412",
   appId: "1:407322219412:web:4c3ef1b70d5d49ccd83581",
-  firestoreDatabaseId: appletConfig.firestoreDatabaseId || "ai-studio-zapchat-0d3e296c-a10d-4c47-b5ca-e28dbaf2dc0a"
+  firestoreDatabaseId: appletConfig.firestoreDatabaseId || "(default)"
 };
 
 // Initialize or reuse Firebase App instance

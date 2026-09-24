@@ -91,8 +91,15 @@ export default function Cadastro({ user, onComplete, onNavigate, onCancel }) {
 
     try {
       const activeUser = auth.currentUser;
-      const targetUid = user?.uid || activeUser?.uid || initialUid || `user_${Date.now()}`;
-      const cleanPhone = phone || user?.phoneNumber || activeUser?.phoneNumber || '+5511999999999';
+      const targetUid = activeUser?.uid || user?.uid || initialUid;
+
+      if (!targetUid) {
+        setError('Por favor, faça a validação do seu número por SMS no login antes de criar o perfil.');
+        setIsSubmitting(false);
+        return;
+      }
+
+      const cleanPhone = activeUser?.phoneNumber || phone || user?.phoneNumber || '+5511999999999';
 
       // 1. Upload foto de perfil para o Firebase Storage se o usuário escolheu uma imagem
       let finalPhotoURL = null;
@@ -230,7 +237,7 @@ export default function Cadastro({ user, onComplete, onNavigate, onCancel }) {
               className="w-full h-auto max-h-[70px] object-contain drop-shadow-[0_4px_20px_rgba(6,182,212,0.35)]"
               referrerPolicy="no-referrer"
               onError={(e) => {
-                const target = e.target;
+                const target = e.currentTarget;
                 if (target && !target.src.includes('/icon/logo_oficial.png')) {
                   target.src = '/icon/logo_oficial.png';
                 }

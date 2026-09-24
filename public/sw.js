@@ -1,22 +1,18 @@
-const CACHE_NAME = 'zapchat-pwa-v6';
+const CACHE_NAME = 'tribbus-pwa-v10';
 const STATIC_ASSETS = [
-  './',
-  './index.html',
-  './manifest.json',
-  './favicon.png',
-  './apple-touch-icon.png',
-  './pwa-icon.png',
-  './icons/icon-192x192.png',
-  './icons/icon-512x512.png'
+  '/manifest.json',
+  '/favicon.png',
+  '/apple-touch-icon.png',
+  '/pwa-icon.png',
+  '/icon/logo_oficial.png',
+  '/icon/ic_tribbus.png'
 ];
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(STATIC_ASSETS).catch(() => {
-        // Continue gracefully even if an asset is not yet available
-      });
+      return cache.addAll(STATIC_ASSETS).catch(() => {});
     })
   );
 });
@@ -39,12 +35,15 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Do not cache API endpoints (use network exclusively for dynamic data)
-  if (url.pathname.startsWith('/api/')) {
+  // Nunca cacheia chamadas de API ou navegação de rotas dinâmicas
+  if (url.pathname.startsWith('/api/') || request.mode === 'navigate') {
+    event.respondWith(
+      fetch(request).catch(() => caches.match('/index.html'))
+    );
     return;
   }
 
-  // Network-first for navigation and app assets so updates show immediately
+  // Network-first para todos os outros recursos
   event.respondWith(
     fetch(request)
       .then((networkResponse) => {
@@ -56,13 +55,6 @@ self.addEventListener('fetch', (event) => {
         }
         return networkResponse;
       })
-      .catch(() => {
-        return caches.match(request).then((cached) => {
-          if (cached) return cached;
-          if (request.mode === 'navigate') {
-            return caches.match('./index.html') || caches.match('/');
-          }
-        });
-      })
+      .catch(() => caches.match(request))
   );
 });
