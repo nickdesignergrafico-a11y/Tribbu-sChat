@@ -242,7 +242,7 @@ export default function App() {
   // =========================================================================
   // 2. ROTA /login: Tela de autenticação por telefone SMS (apenas para não autenticados)
   // =========================================================================
-  if (!currentUser || normalizedCurrent === '/login') {
+  if (!currentUser || (normalizedCurrent === '/login' && !hasCompletedProfile)) {
     return (
       <LoginScreen
         onLoginSuccess={(session) => {

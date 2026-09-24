@@ -27,3 +27,10 @@ export async function navigate(toPath: string): Promise<void> {
   }
   return Promise.resolve();
 }
+
+/**
+ * Hook utilitário useNavigate padrão para React
+ */
+export function useNavigate() {
+  return navigate;
+}
