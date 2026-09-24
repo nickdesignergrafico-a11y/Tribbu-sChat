@@ -200,6 +200,18 @@ export default function App() {
     (pendingCadastroUser && !hasCompletedProfile)
   );
 
+  // Aguarda a resolução inicial da autenticação Firebase para evitar transição dupla (tela de login piscando e logo em seguida tela de conversa)
+  if (!isAuthReady) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-slate-950 font-sans antialiased text-white select-none">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-10 h-10 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin" />
+          <p className="text-xs text-white/60 font-medium tracking-wide">Carregando Tribbu'sChat...</p>
+        </div>
+      </div>
+    );
+  }
+
   // =========================================================================
   // 1. ROTA /cadastro: Aponta diretamente para Cadastro.jsx
   // ACESSO 100% LIVRE PARA QUEM VALIDA SMS MAS NÃO TEM CADASTRO NO /users
@@ -264,7 +276,15 @@ export default function App() {
   // =========================================================================
   // 3. ROTA /chat e Default: Área principal do Tribbu'sChat (usuário com perfil completo no /users)
   // =========================================================================
+  const effectiveSession = userSession || (currentUser ? {
+    uid: currentUser.uid,
+    phoneNumber: currentUser.phoneNumber || '',
+    displayName: currentUser.displayName || 'Usuário',
+    initial: (currentUser.displayName || 'U').charAt(0).toUpperCase(),
+    avatarColor: '#06B6D4'
+  } : null);
+
   return (
-    <MainChatApp userSession={userSession} onLogout={handleLogout} />
+    <MainChatApp userSession={effectiveSession} onLogout={handleLogout} />
   );
 }
