@@ -34,6 +34,7 @@ import { StatusViewerModal } from './StatusViewerModal';
 import { NewStatusModal } from './NewStatusModal';
 import NewDirectChatModal from './NewDirectChatModal';
 import NewTribbuModal from './NewTribbuModal';
+import ContactPickerButton from './ContactPickerButton';
 import Contatos, { TribbuBalloonIcon } from './Contatos.jsx';
 import { subscribeToStatuses, groupStatusesByUser, publishStatus, publishTextStatus } from '../services/statusService';
 import { useBranding } from '../context/BrandingContext';
@@ -581,7 +582,7 @@ export default function Sidebar({
       )}
 
       {/* Prominent Neon Action Buttons: Nova Conversa Individual & Nova Tribbu */}
-      <div className="p-2.5 grid grid-cols-2 gap-2.5 bg-slate-950/80 border-b border-cyan-500/20 flex-shrink-0">
+      <div className="p-2.5 grid grid-cols-2 gap-2.5 bg-slate-950/80 flex-shrink-0">
         <button
           type="button"
           onClick={() => setShowNewDirectChatModal(true)}
@@ -604,6 +605,12 @@ export default function Sidebar({
           <span className="truncate">Nova Tribbu</span>
         </button>
       </div>
+
+      {/* Contact Picker API Button: Buscar da Agenda + Fallback */}
+      <ContactPickerButton
+        currentUserPhone={user.phoneNumber}
+        onOpenChatWithContact={handleStartDirectChat}
+      />
 
       {/* Filter Pills: Todas, Individuais, Tribbus, Não lidas, Favoritas */}
       <div className="px-3.5 py-2 flex items-center gap-1.5 overflow-x-auto no-scrollbar border-b border-white/5 flex-shrink-0 bg-slate-900/40">

@@ -300,6 +300,39 @@ async function startServer() {
     });
   });
 
+  // GET /api/users/check (validate if an E.164 phone number belongs to a registered app user)
+  app.get('/api/users/check', (req, res) => {
+    const rawPhone = String(req.query.phone || '');
+    const digitsOnly = rawPhone.replace(/[\s().+-]/g, '').replace(/\D/g, '');
+    const e164Phone = digitsOnly ? `+${digitsOnly}` : '';
+
+    if (!e164Phone || e164Phone.length < 8 || e164Phone.length > 16) {
+      return res.status(200).json({ exists: false });
+    }
+
+    const foundUser = db.users.find((u) => {
+      const uDigits = (u.phoneNumber || '').replace(/[\s().+-]/g, '').replace(/\D/g, '');
+      const uE164 = uDigits ? `+${uDigits}` : '';
+      if (!uE164 || uE164.length < 8 || uE164.length > 16) return false;
+      if (uE164 === e164Phone) return true;
+      return uDigits.endsWith(digitsOnly) || digitsOnly.endsWith(uDigits);
+    });
+
+    if (foundUser) {
+      return res.status(200).json({
+        exists: true,
+        user: {
+          phoneNumber: foundUser.phoneNumber,
+          displayName: foundUser.displayName || foundUser.phoneNumber,
+          initial: foundUser.initial,
+          avatarColor: foundUser.avatarColor
+        }
+      });
+    }
+
+    return res.status(200).json({ exists: false });
+  });
+
   // --- CHAT ENDPOINTS ---
 
   // POST /api/chats (create a new chat)
