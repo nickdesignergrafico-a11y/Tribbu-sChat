@@ -44,9 +44,9 @@ export function TribbuBalloonIcon({ className = "w-5 h-5", title = "Usuário cad
       viewBox="0 0 24 24" 
       fill="none" 
       xmlns="http://www.w3.org/2000/svg"
-      title={title}
       aria-label={title}
     >
+      <title>{title}</title>
       <defs>
         <linearGradient id="tribbuBalloonGrad" x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse">
           <stop offset="0%" stopColor="#22D3EE" />
@@ -124,12 +124,21 @@ const DEFAULT_LOCAL_CONTACTS = [
   { id: 'c5', name: 'Gabriel Santos', phone: '+5541955554444', note: 'Marketing' }
 ];
 
+/**
+ * @param {{
+ *   isOpen?: boolean,
+ *   onClose?: () => void,
+ *   currentUser?: any,
+ *   onSelectContact?: (contact: any) => void,
+ *   onStartDirectChat?: (contact: any) => void
+ * }} props
+ */
 export default function Contatos({
   isOpen = true,
-  onClose = undefined,
-  currentUser = null,
-  onSelectContact = undefined,
-  onStartDirectChat = undefined
+  onClose,
+  currentUser,
+  onSelectContact,
+  onStartDirectChat
 }) {
   const { logoUrl } = useBranding();
 

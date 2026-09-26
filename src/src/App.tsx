@@ -418,7 +418,12 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
           if (!snap.empty) {
             const fsChats: Chat[] = [];
             snap.forEach(d => {
-              fsChats.push({ id: d.id, ...d.data() } as Chat);
+              const chatData = d.data();
+              fsChats.push({ 
+                id: d.id, 
+                ...chatData,
+                messages: Array.isArray(chatData.messages) ? chatData.messages : []
+              } as Chat);
             });
             const finalFs = ensureTribbuAIPresent(fsChats);
             setChats(finalFs);
@@ -504,8 +509,9 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
                 contactPhone: m.contactPhone
               }));
 
-              const merged = deduplicateMessages([...chat.messages, ...newMsgs]);
-              if (merged.length === chat.messages.length) return chat;
+              const currentChatMsgs = Array.isArray(chat.messages) ? chat.messages : [];
+              const merged = deduplicateMessages([...currentChatMsgs, ...newMsgs]);
+              if (merged.length === currentChatMsgs.length) return chat;
 
               updated = true;
               const isCurrentlyActive = chat.id === activeChatIdRef.current;
@@ -513,7 +519,7 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
               return {
                 ...chat,
                 messages: merged,
-                unreadCount: isCurrentlyActive ? 0 : chat.unreadCount + (merged.length - chat.messages.length)
+                unreadCount: isCurrentlyActive ? 0 : (chat.unreadCount || 0) + (merged.length - currentChatMsgs.length)
               };
             });
 
@@ -533,7 +539,7 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
                 // New chat created
                 const clientChat: Chat = {
                   ...serverChat,
-                  messages: serverChat.messages.map((m: any) => ({
+                  messages: (Array.isArray(serverChat.messages) ? serverChat.messages : []).map((m: any) => ({
                     id: m.id,
                     sender: (isSamePhoneNumber(m.senderPhoneNumber, user.phoneNumber) ||
                              (m.senderEmail && user.email && m.senderEmail === user.email) ||
@@ -621,9 +627,10 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
           setChats(prev => {
             return prev.map(c => {
               if (c.id === activeChatId) {
+                const currentMsgs = Array.isArray(c.messages) ? c.messages : [];
                 return {
                   ...c,
-                  messages: deduplicateMessages([...c.messages, ...firestoreMsgs])
+                  messages: deduplicateMessages([...currentMsgs, ...firestoreMsgs])
                 };
               }
               return c;
@@ -895,10 +902,11 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
           setChats(prev => {
             const next = prev.map(c => {
               if (c.id === activeChatId) {
+                const currentMsgs = Array.isArray(c.messages) ? c.messages : [];
                 return {
                   ...c,
                   statusText: 'Tribbu AI • Assistente Inteligente Online',
-                  messages: deduplicateMessages([...c.messages, aiMessage])
+                  messages: deduplicateMessages([...currentMsgs, aiMessage])
                 };
               }
               return c;
@@ -916,7 +924,7 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
     }
   };
 
-  const handleSendAttachment = (type: 'image' | 'document' | 'location' | 'contact') => {
+  const handleSendAttachment = (type: 'image' | 'document' | 'location' | 'contact' | 'video') => {
     if (!activeChatId) return;
 
     if (type === 'location') {
@@ -1072,14 +1080,14 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
         members: clientChat.members || [user.phoneNumber],
         description: clientChat.description || null,
         createdAt: new Date().toISOString(),
-        lastMessage: clientChat.messages[0]?.text || '',
-        lastMessageTime: clientChat.messages[0]?.time || getFormattedTime(),
-        lastMessageTimestamp: clientChat.messages[0]?.timestamp || Date.now(),
+        lastMessage: clientChat.messages?.[0]?.text || '',
+        lastMessageTime: clientChat.messages?.[0]?.time || getFormattedTime(),
+        lastMessageTimestamp: clientChat.messages?.[0]?.timestamp || Date.now(),
         unreadCount: 0
       });
 
       // Write initial message to Firestore subcollection
-      if (clientChat.messages.length > 0) {
+      if (clientChat.messages && clientChat.messages.length > 0) {
         const firstMsg = clientChat.messages[0];
         await addDoc(collection(db, 'chats', clientChat.id, 'messages'), {
           text: firstMsg.text,
@@ -1272,12 +1280,15 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
       localStorage.setItem('zapchat_user', JSON.stringify(updatedUser));
     } catch (_) {}
 
-    // Update in Firebase Auth
+    // Update in Firebase Auth (only set photoURL if it's a valid remote HTTP URL to prevent length limit issues)
     try {
       if (auth.currentUser) {
+        const authPhotoUrl = (storagePhotoUrl && storagePhotoUrl.startsWith('http')) 
+          ? storagePhotoUrl 
+          : (user.photoURL && user.photoURL.startsWith('http') ? user.photoURL : undefined);
         await updateProfile(auth.currentUser, {
           displayName: updated.displayName || user.displayName,
-          photoURL: storagePhotoUrl !== undefined ? storagePhotoUrl : user.photoURL
+          photoURL: authPhotoUrl
         });
       }
     } catch {
@@ -1287,16 +1298,17 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
     // Update in Firestore users collection
     if (uid) {
       try {
+        const photoVal = storagePhotoUrl !== undefined ? (storagePhotoUrl || null) : (user.photoURL || null);
         await setDoc(doc(db, 'users', uid), {
           phoneNumber: updated.phoneNumber !== undefined ? updated.phoneNumber : (user.phoneNumber || null),
           displayName: updated.displayName || user.displayName || user.phoneNumber,
           initial: updated.initial || user.initial,
           avatarColor: user.avatarColor,
-          photoURL: storagePhotoUrl !== undefined ? storagePhotoUrl : (user.photoURL || null),
+          photoURL: photoVal,
           updatedAt: new Date().toISOString()
         }, { merge: true });
-      } catch {
-        // Handled silently
+      } catch (err) {
+        console.warn('[App] Erro ao sincronizar perfil no Firestore:', err);
       }
     }
   };

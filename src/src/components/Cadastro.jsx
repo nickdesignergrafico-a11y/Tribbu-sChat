@@ -119,12 +119,13 @@ export default function Cadastro({ user, onComplete, onNavigate, onCancel }) {
       const nowTimestamp = Date.now();
       const nowIso = new Date().toISOString();
 
-      // 3. Atualiza Firebase Auth Profile
+      // 3. Atualiza Firebase Auth Profile (apenas URL remota para respeitar limite do Firebase Auth)
       if (activeUser) {
         try {
+          const authPhotoUrl = (finalPhotoURL && finalPhotoURL.startsWith('http')) ? finalPhotoURL : undefined;
           await updateProfile(activeUser, {
             displayName: trimmedName,
-            photoURL: finalPhotoURL || undefined
+            photoURL: authPhotoUrl
           });
         } catch (authErr) {
           console.warn('[Cadastro] Erro ao atualizar profile auth:', authErr);
@@ -149,17 +150,21 @@ export default function Cadastro({ user, onComplete, onNavigate, onCancel }) {
       const userDocRef = doc(db, 'users', targetUid);
       await setDoc(userDocRef, userProfileData, { merge: true });
 
-      // Sincroniza com API backend se disponível
+      // Sincroniza com API backend se disponível (com timeout de 2s para evitar travar na Netlify)
       let serverToken = '';
       try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2000);
         const res = await fetch('/api/auth/phone-login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             phoneNumber: cleanPhone,
             displayName: trimmedName
-          })
+          }),
+          signal: controller.signal
         });
+        clearTimeout(timeoutId);
         if (res.ok) {
           const data = await res.json();
           serverToken = data.token;
@@ -237,7 +242,7 @@ export default function Cadastro({ user, onComplete, onNavigate, onCancel }) {
               className="w-full h-auto max-h-[70px] object-contain drop-shadow-[0_4px_20px_rgba(6,182,212,0.35)]"
               referrerPolicy="no-referrer"
               onError={(e) => {
-                const target = e.target;
+                const target = e.currentTarget;
                 if (target && !target.src.includes('/icon/logo_oficial.png')) {
                   target.src = '/icon/logo_oficial.png';
                 }

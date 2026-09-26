@@ -220,7 +220,10 @@ export default function LoginScreen({ onLoginSuccess, onNavigateToCadastro }: Lo
         } catch (_) {}
       }
 
-      if (err.code === 'auth/invalid-phone-number') {
+      if (err.code === 'auth/unauthorized-domain') {
+        const host = typeof window !== 'undefined' ? window.location.hostname : 'Netlify';
+        setError(`Domínio "${host}" não está autorizado no Firebase! Acesse o Firebase Console (Projeto zapchat-b635d) > Authentication > Settings > Authorized domains e adicione "${host}".`);
+      } else if (err.code === 'auth/invalid-phone-number') {
         setError('Número de telefone inválido no formato internacional. Verifique o código do país e o número digitado.');
       } else if (err.code === 'auth/quota-exceeded') {
         setError('Limite de envio de SMS atingido temporariamente. Aguarde alguns minutos e tente novamente.');
@@ -374,7 +377,10 @@ export default function LoginScreen({ onLoginSuccess, onNavigateToCadastro }: Lo
 
     } catch (err: any) {
       console.error('Erro ao validar código SMS:', err);
-      if (err.code === 'auth/invalid-verification-code') {
+      if (err.code === 'auth/unauthorized-domain') {
+        const host = typeof window !== 'undefined' ? window.location.hostname : 'Netlify';
+        setError(`Domínio "${host}" não está autorizado no Firebase! Adicione "${host}" em Firebase Console > Authentication > Settings > Authorized domains.`);
+      } else if (err.code === 'auth/invalid-verification-code') {
         setError('Código SMS incorreto. Verifique os 6 números recebidos no seu celular.');
       } else if (err.code === 'auth/code-expired') {
         setError('O código SMS expirou. Clique em reenviar para receber um novo código.');

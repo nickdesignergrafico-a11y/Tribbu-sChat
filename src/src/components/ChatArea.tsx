@@ -295,7 +295,7 @@ export default function ChatArea({
   // Scroll effect on chat change or message arrival
   useEffect(() => {
     if (!chat) return;
-    const currentCount = chat.messages?.length || 0;
+    const currentCount = chat?.messages?.length || 0;
     const prevCount = prevMessagesCountRef.current;
     prevMessagesCountRef.current = currentCount;
 
@@ -840,9 +840,10 @@ export default function ChatArea({
   };
 
   // Filter messages if search inside chat is active
+  const rawMessages = Array.isArray(chat?.messages) ? chat.messages : [];
   const displayedMessages = chatSearchQuery.trim()
-    ? chat.messages.filter(msg => msg.text.toLowerCase().includes(chatSearchQuery.toLowerCase()))
-    : chat.messages;
+    ? rawMessages.filter(msg => msg && msg.text && msg.text.toLowerCase().includes(chatSearchQuery.toLowerCase()))
+    : rawMessages;
 
   return (
     <div className="w-full flex-1 flex flex-col h-full bg-slate-950/40 relative overflow-hidden">

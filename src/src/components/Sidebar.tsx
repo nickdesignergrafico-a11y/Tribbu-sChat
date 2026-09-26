@@ -122,7 +122,7 @@ export default function Sidebar({
   }, [statuses, user, viewedStatusIds]);
 
   const handleMyStatusClick = () => {
-    if (myGroup && myGroup.statuses.length > 0) {
+    if (myGroup && myGroup.statuses?.length > 0) {
       // Open story viewer to watch own status!
       setStatusViewerGroups([myGroup, ...contactGroups]);
       setStatusViewerGroupIndex(0);
@@ -139,8 +139,9 @@ export default function Sidebar({
   };
 
   const handleContactStatusClick = (index: number) => {
-    const allGroups = myGroup && myGroup.statuses.length > 0 ? [myGroup, ...contactGroups] : contactGroups;
-    const targetIdx = myGroup && myGroup.statuses.length > 0 ? index + 1 : index;
+    const hasMyStatus = myGroup && myGroup.statuses?.length > 0;
+    const allGroups = hasMyStatus ? [myGroup, ...contactGroups] : contactGroups;
+    const targetIdx = hasMyStatus ? index + 1 : index;
     setStatusViewerGroups(allGroups);
     setStatusViewerGroupIndex(targetIdx);
     setShowStatusViewer(true);
@@ -677,7 +678,7 @@ export default function Sidebar({
                 >
                   <div className="relative">
                     <div className={`w-14 h-14 rounded-full p-[2.5px] transition-all duration-200 group-hover:scale-105 ${
-                      myGroup && myGroup.statuses.length > 0
+                      myGroup && myGroup.statuses?.length > 0
                         ? 'bg-gradient-to-tr from-cyan-400 via-teal-400 to-emerald-400 shadow-[0_0_12px_rgba(6,182,212,0.4)]'
                         : 'p-[2px] border-2 border-dashed border-cyan-400/50 hover:border-cyan-300'
                     }`}>
@@ -715,7 +716,8 @@ export default function Sidebar({
                 {/* 2. Contacts Statuses */}
                 {contactGroups.map((group, index) => {
                   const isUnread = group.hasUnread;
-                  const latestStatus = group.statuses[group.statuses.length - 1];
+                  const groupStatuses = Array.isArray(group.statuses) ? group.statuses : [];
+                  const latestStatus = groupStatuses.length > 0 ? groupStatuses[groupStatuses.length - 1] : null;
                   const isVideo = latestStatus?.mediaType === 'video';
                   const isText = latestStatus?.mediaType === 'text';
                   const isNotice = !!latestStatus?.isTribbuNotice;
@@ -725,7 +727,7 @@ export default function Sidebar({
                       key={group.userId}
                       onClick={() => handleContactStatusClick(index)}
                       className="flex flex-col items-center gap-1.5 flex-shrink-0 cursor-pointer group"
-                      title={`${group.userName} (${group.statuses.length} status)`}
+                      title={`${group.userName} (${groupStatuses.length} status)`}
                     >
                       <div className="relative">
                         {/* Se houver um status novo, a borda do círculo usa o degradê ciano e verde da logo */}
@@ -1053,7 +1055,7 @@ export default function Sidebar({
                     src={user.photoURL} 
                     alt={user.displayName} 
                     className={`w-12 h-12 rounded-full object-cover p-0.5 ${
-                      myGroup && myGroup.statuses.length > 0 
+                      myGroup && myGroup.statuses?.length > 0 
                         ? 'border-2 border-cyan-400 shadow-md shadow-cyan-500/20' 
                         : 'border border-white/20'
                     }`} 
@@ -1061,7 +1063,7 @@ export default function Sidebar({
                 ) : (
                   <div 
                     className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-base ${
-                      myGroup && myGroup.statuses.length > 0 
+                      myGroup && myGroup.statuses?.length > 0 
                         ? 'border-2 border-cyan-400 shadow-md shadow-cyan-500/20' 
                         : 'border border-white/20'
                     }`} 
@@ -1085,14 +1087,14 @@ export default function Sidebar({
               <div className="flex-1 min-w-0">
                 <p className="font-bold text-sm text-white flex items-center justify-between">
                   <span>Meu status</span>
-                  {myGroup && myGroup.statuses.length > 0 && (
+                  {myGroup && myGroup.statuses?.length > 0 && (
                     <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded-full border border-cyan-500/20">
                       {myGroup.statuses.length} ativo{myGroup.statuses.length > 1 ? 's' : ''}
                     </span>
                   )}
                 </p>
                 <p className="text-xs text-white/50 truncate mt-0.5">
-                  {myGroup && myGroup.statuses.length > 0
+                  {myGroup && myGroup.statuses?.length > 0
                     ? 'Toque para ver seus status'
                     : 'Toque para adicionar uma foto ou vídeo'}
                 </p>
@@ -1113,10 +1115,11 @@ export default function Sidebar({
               {contactGroups.length > 0 ? (
                 <div className="space-y-1.5">
                   {contactGroups.map((group, index) => {
-                    const latestStatus = group.statuses[group.statuses.length - 1];
+                    const groupStatuses = Array.isArray(group.statuses) ? group.statuses : [];
+                    const latestStatus = groupStatuses.length > 0 ? groupStatuses[groupStatuses.length - 1] : null;
                     const isUnread = group.hasUnread;
 
-                    const diffMin = Math.floor((Date.now() - latestStatus.timestamp) / (1000 * 60));
+                    const diffMin = latestStatus ? Math.floor((Date.now() - latestStatus.timestamp) / (1000 * 60)) : 0;
                     const timeAgo = diffMin < 1 
                       ? 'Agora' 
                       : diffMin < 60 
