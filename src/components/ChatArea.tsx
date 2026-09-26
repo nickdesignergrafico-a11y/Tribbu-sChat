@@ -76,6 +76,7 @@ interface ChatAreaProps {
     }
   ) => void;
   onSendAttachment?: (type: 'image' | 'video' | 'document' | 'location' | 'contact') => void;
+  onDeleteMessage?: (messageId: string) => void;
   onBackToSidebar: () => void;
   onRevokeInvite?: (chatId: string) => Promise<string | void>;
 }
@@ -87,6 +88,7 @@ export default function ChatArea({
   currentUser = null,
   onSendMessage, 
   onSendAttachment,
+  onDeleteMessage,
   onBackToSidebar,
   onRevokeInvite
 }: ChatAreaProps) {
@@ -102,6 +104,42 @@ export default function ChatArea({
   const [uploadProgress, setUploadProgress] = useState<UploadProgressInfo | null>(null);
   const [showShareContactModal, setShowShareContactModal] = useState(false);
   const [copiedPhoneId, setCopiedPhoneId] = useState<string | null>(null);
+  const [activeDeleteMsgId, setActiveDeleteMsgId] = useState<string | null>(null);
+  const longPressTimerRef = useRef<any>(null);
+  const longPressTriggeredRef = useRef<boolean>(false);
+
+  const handleMessagePressStart = (msgId: string) => {
+    longPressTriggeredRef.current = false;
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+    }
+    longPressTimerRef.current = setTimeout(() => {
+      longPressTriggeredRef.current = true;
+      setActiveDeleteMsgId(msgId);
+      if (typeof navigator !== 'undefined' && navigator.vibrate) {
+        try {
+          navigator.vibrate(35);
+        } catch (_) {}
+      }
+    }, 420);
+  };
+
+  const handleMessagePressEnd = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const handleConfirmDeleteMessage = (e: React.MouseEvent, msgId: string) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (onDeleteMessage) {
+      onDeleteMessage(msgId);
+    }
+    setActiveDeleteMsgId(null);
+    longPressTriggeredRef.current = false;
+  };
   
   // Active "Aviso da Tribbu" (24h) for Groups and Channels
   const [groupNotice, setGroupNotice] = useState<StatusItem | null>(null);
@@ -123,11 +161,10 @@ export default function ChatArea({
       setGroupNotice(chat.activeNotice);
     }
 
-    // 2. Real-time query to statuses in Firestore
+    // 2. Real-time query to statuses in Firestore (single-field orderBy to avoid composite index error)
     try {
       const q = query(
         collection(db, 'statuses'),
-        where('isTribbuNotice', '==', true),
         orderBy('timestamp', 'desc')
       );
 
@@ -139,6 +176,7 @@ export default function ChatArea({
           const item = { id: docSnap.id, ...docSnap.data() } as StatusItem;
           if (
             !found &&
+            item.isTribbuNotice &&
             item.expiresAt &&
             item.expiresAt > currentNow &&
             (item.targetGroupId === chat.id || item.targetGroupName === chat.name || !item.targetGroupId)
@@ -736,9 +774,8 @@ export default function ChatArea({
       recordingIntervalRef.current = setInterval(() => {
         setRecordingSeconds((s) => s + 1);
       }, 1000);
-    } catch (err) {
-      console.warn('Microphone permission required:', err);
-      alert('Permissão de microfone necessária para gravar áudios.');
+    } catch {
+      // Permissão de microfone indisponível no momento
     }
   };
 
@@ -777,8 +814,8 @@ export default function ChatArea({
             fileName: `Áudio (${mins}:${secs})`
           });
           setTimeout(() => scrollToBottom('smooth'), 50);
-        } catch (err) {
-          console.error('Audio upload error:', err);
+        } catch {
+          // Fallback silencioso para upload de áudio
         } finally {
           setIsProcessingUpload(false);
         }
@@ -855,29 +892,6 @@ export default function ChatArea({
           backgroundRepeat: 'repeat',
           backgroundSize: '360px'
         }}
-      />
-
-      {/* Hidden file input elements for real uploads */}
-      <input 
-        type="file" 
-        ref={imageInputRef} 
-        accept="image/*" 
-        className="hidden" 
-        onChange={handleImageUpload} 
-      />
-      <input 
-        type="file" 
-        ref={videoInputRef} 
-        accept="video/*" 
-        className="hidden" 
-        onChange={handleVideoUpload} 
-      />
-      <input 
-        type="file" 
-        ref={docInputRef} 
-        accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.zip,.rar" 
-        className="hidden" 
-        onChange={handleDocUpload} 
       />
 
       {/* Chat Header */}
@@ -1172,6 +1186,9 @@ export default function ChatArea({
       <div 
         ref={scrollContainerRef}
         onScroll={handleScroll}
+        onClick={() => {
+          if (activeDeleteMsgId) setActiveDeleteMsgId(null);
+        }}
         className="flex-1 overflow-y-auto px-[5%] py-6 flex flex-col gap-3.5 z-10 relative custom-scrollbar scroll-smooth"
       >
         {/* Empty state if chat has no messages */}
@@ -1248,15 +1265,65 @@ export default function ChatArea({
             }
           }
 
+          const isSelectedForDelete = activeDeleteMsgId === msg.id;
+
           return (
             <div
               key={msg.id}
-              className={`max-w-[85%] sm:max-w-[70%] md:max-w-[62%] min-w-[100px] p-2.5 sm:p-3 rounded-2xl text-[14px] leading-relaxed shadow-sm relative break-words transition-all ${
+              onMouseDown={() => handleMessagePressStart(msg.id)}
+              onMouseUp={handleMessagePressEnd}
+              onMouseLeave={handleMessagePressEnd}
+              onTouchStart={() => handleMessagePressStart(msg.id)}
+              onTouchEnd={handleMessagePressEnd}
+              onTouchMove={handleMessagePressEnd}
+              onTouchCancel={handleMessagePressEnd}
+              onClick={(e) => {
+                if (longPressTriggeredRef.current || isSelectedForDelete) {
+                  e.stopPropagation();
+                  longPressTriggeredRef.current = false;
+                }
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                longPressTriggeredRef.current = true;
+                setActiveDeleteMsgId(msg.id);
+              }}
+              className={`max-w-[85%] sm:max-w-[70%] md:max-w-[62%] min-w-[100px] p-2.5 sm:p-3 rounded-2xl text-[14px] leading-relaxed shadow-sm relative break-words transition-all select-none ${
                 isMe 
                   ? 'bg-cyan-950/70 border border-cyan-500/40 self-end rounded-tr-none text-white shadow-md shadow-cyan-950/30' 
                   : 'bg-slate-800/85 border border-white/10 self-start rounded-tl-none text-white'
-              }`}
+              } ${isSelectedForDelete ? 'ring-2 ring-red-500/80 scale-[0.99]' : ''}`}
             >
+              {/* Trash Icon Action Button on Long Press / Click & Hold */}
+              {isSelectedForDelete && (
+                <div 
+                  onClick={(e) => e.stopPropagation()}
+                  className={`absolute -top-3.5 ${isMe ? 'left-2' : 'right-2'} z-30 flex items-center gap-1 bg-slate-900/95 border border-red-500/50 rounded-full px-2.5 py-1 shadow-xl shadow-black/60 animate-in fade-in zoom-in-90 duration-150`}
+                >
+                  <button
+                    type="button"
+                    onClick={(e) => handleConfirmDeleteMessage(e, msg.id)}
+                    className="flex items-center gap-1 text-red-400 hover:text-red-300 text-xs font-bold cursor-pointer pr-1"
+                    title="Excluir mensagem"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 stroke-[2.4]" />
+                    <span>Excluir</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setActiveDeleteMsgId(null);
+                    }}
+                    className="p-0.5 text-white/50 hover:text-white rounded-full cursor-pointer"
+                    title="Cancelar"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
+
               {/* Group message sender's name tag */}
               {!isMe && chat.isGroup && msg.senderName && (
                 <p className="text-[11px] font-bold text-cyan-400 mb-1 select-none leading-none">
@@ -1269,7 +1336,10 @@ export default function ChatArea({
                 <div className="flex flex-col gap-1 mb-1">
                   <div 
                     className="relative group rounded-2xl overflow-hidden cursor-pointer border border-white/15 bg-black/40 shadow-lg"
-                    onClick={() => setSelectedImageModal({ url: msg.mediaUrl!, name: msg.fileName || 'Foto' })}
+                    onClick={() => {
+                      if (longPressTriggeredRef.current || isSelectedForDelete) return;
+                      setSelectedImageModal({ url: msg.mediaUrl!, name: msg.fileName || 'Foto' });
+                    }}
                     title="Clique para abrir a foto em tela cheia"
                   >
                     <img 
@@ -1323,7 +1393,10 @@ export default function ChatArea({
               {/* 2. DOCUMENT ATTACHMENT */}
               {isDoc && (
                 <div 
-                  onClick={() => handleOpenDocument(msg.mediaUrl, msg.fileName)}
+                  onClick={() => {
+                    if (longPressTriggeredRef.current || isSelectedForDelete) return;
+                    handleOpenDocument(msg.mediaUrl, msg.fileName);
+                  }}
                   className="bg-black/30 hover:bg-black/45 border border-white/10 rounded-xl p-2.5 sm:p-3 flex items-center justify-between gap-3 cursor-pointer group transition-all my-1 select-none"
                   title="Clique para abrir ou baixar o documento"
                 >

@@ -146,11 +146,9 @@ export default function LoginScreen({ onLoginSuccess, onNavigateToCadastro }: Lo
       if (res.success) {
         setLogoSuccessMsg('✓ Logotipo salvo com sucesso e gravado permanentemente na nuvem!');
         setTimeout(() => setLogoSuccessMsg(''), 6000);
-      } else {
-        alert(res.message || 'Erro ao atualizar logotipo.');
       }
-    } catch (err: any) {
-      alert('Falha ao atualizar logotipo: ' + (err.message || 'Erro desconhecido'));
+    } catch {
+      // Silencioso
     }
   };
 
@@ -184,6 +182,10 @@ export default function LoginScreen({ onLoginSuccess, onNavigateToCadastro }: Lo
           recaptchaVerifierRef.current = null;
         } catch (_) {}
       }
+      const recaptchaEl = document.getElementById('recaptcha-container');
+      if (recaptchaEl) {
+        recaptchaEl.innerHTML = '';
+      }
 
       // Configura o verificador reCAPTCHA invisível no container dedicado para não interceptar cliques do botão de confirmação
       recaptchaVerifierRef.current = new RecaptchaVerifier(auth, 'recaptcha-container', {
@@ -211,13 +213,16 @@ export default function LoginScreen({ onLoginSuccess, onNavigateToCadastro }: Lo
         } catch (_) {}
       }
     } catch (err: any) {
-      console.error('Erro no signInWithPhoneNumber do Firebase:', err);
       // Limpa o verificador em caso de falha para permitir nova tentativa
       if (recaptchaVerifierRef.current) {
         try {
           recaptchaVerifierRef.current.clear();
           recaptchaVerifierRef.current = null;
         } catch (_) {}
+      }
+      const recaptchaEl = document.getElementById('recaptcha-container');
+      if (recaptchaEl) {
+        recaptchaEl.innerHTML = '';
       }
 
       if (err.code === 'auth/unauthorized-domain') {
@@ -376,7 +381,6 @@ export default function LoginScreen({ onLoginSuccess, onNavigateToCadastro }: Lo
       return;
 
     } catch (err: any) {
-      console.error('Erro ao validar código SMS:', err);
       if (err.code === 'auth/unauthorized-domain') {
         const host = typeof window !== 'undefined' ? window.location.hostname : 'Netlify';
         setError(`Domínio "${host}" não está autorizado no Firebase! Adicione "${host}" em Firebase Console > Authentication > Settings > Authorized domains.`);

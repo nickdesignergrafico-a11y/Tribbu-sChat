@@ -481,6 +481,23 @@ async function startServer() {
     res.status(201).json(newMessage);
   });
 
+  // DELETE /api/chats/:chatId/messages/:messageId (delete a message)
+  app.delete('/api/chats/:chatId/messages/:messageId', (req: any, res) => {
+    const { chatId, messageId } = req.params;
+    const chat = db.chats.find(c => c.id === chatId);
+    if (!chat) {
+      return res.status(404).json({ error: 'Conversa não encontrada.' });
+    }
+
+    const initialLen = chat.messages.length;
+    chat.messages = chat.messages.filter(m => m.id !== messageId);
+    if (chat.messages.length !== initialLen) {
+      saveDB();
+    }
+
+    res.status(200).json({ success: true, deletedId: messageId });
+  });
+
   // GET /api/chats (returns all chats)
   app.get('/api/chats', (req, res) => {
     res.status(200).json(db.chats);
@@ -581,7 +598,14 @@ async function startServer() {
       if (!apiKey) {
         throw new Error('GEMINI_API_KEY environment variable is required');
       }
-      genAIClient = new GoogleGenAI({ apiKey });
+      genAIClient = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          },
+        },
+      });
     }
     return genAIClient;
   }

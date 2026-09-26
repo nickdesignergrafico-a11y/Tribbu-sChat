@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tribbus-pwa-v10';
+const CACHE_NAME = 'tribbus-pwa-v11';
 const STATIC_ASSETS = [
   '/manifest.json',
   '/favicon.png',
@@ -33,17 +33,32 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const { request } = event;
+  if (request.method !== 'GET') return;
+
   const url = new URL(request.url);
 
-  // Nunca cacheia chamadas de API ou navegação de rotas dinâmicas
-  if (url.pathname.startsWith('/api/') || request.mode === 'navigate') {
+  // Ignora requisições cross-origin (ex: Firebase/Google APIs) e módulos de desenvolvimento/API
+  if (
+    url.origin !== self.location.origin ||
+    url.pathname.startsWith('/api/') ||
+    url.pathname.startsWith('/src/') ||
+    url.pathname.startsWith('/@') ||
+    url.pathname.startsWith('/node_modules/')
+  ) {
+    return;
+  }
+
+  if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(request).catch(() => caches.match('/index.html'))
+      fetch(request).catch(async () => {
+        const cached = await caches.match('/index.html');
+        return cached || new Response('Offline', { status: 503, headers: { 'Content-Type': 'text/plain' } });
+      })
     );
     return;
   }
 
-  // Network-first para todos os outros recursos
+  // Network-first para recursos estáticos do mesmo domínio
   event.respondWith(
     fetch(request)
       .then((networkResponse) => {
@@ -55,6 +70,9 @@ self.addEventListener('fetch', (event) => {
         }
         return networkResponse;
       })
-      .catch(() => caches.match(request))
+      .catch(async () => {
+        const cached = await caches.match(request);
+        return cached || new Response('', { status: 404 });
+      })
   );
 });

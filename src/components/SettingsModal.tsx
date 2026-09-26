@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   X, 
   Camera, 
@@ -49,6 +49,14 @@ export default function SettingsModal({
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [logoUploadSuccess, setLogoUploadSuccess] = useState(false);
 
+  useEffect(() => {
+    if (isOpen) {
+      setDisplayName(user.displayName || user.phoneNumber || '');
+      setPhoneNumber(user.phoneNumber || '');
+      setPhotoURL(user.photoURL || null);
+    }
+  }, [isOpen, user.displayName, user.phoneNumber, user.photoURL]);
+
   const { logoUrl, updateLogo, isUpdatingLogo, resetLogo } = useBranding();
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -65,11 +73,9 @@ export default function SettingsModal({
       if (res.success) {
         setLogoUploadSuccess(true);
         setTimeout(() => setLogoUploadSuccess(false), 5000);
-      } else {
-        alert(res.message || 'Erro ao salvar logotipo');
       }
-    } catch (err: any) {
-      alert('Erro ao enviar imagem: ' + (err.message || 'Erro interno'));
+    } catch {
+      // Silencioso
     }
   };
 
@@ -79,8 +85,8 @@ export default function SettingsModal({
       try {
         const compressed = await resizeAndCompressImage(file, 400, 400, 0.85);
         setPhotoURL(compressed);
-      } catch (err) {
-        alert('Erro ao carregar a imagem. Tente outro arquivo.');
+      } catch {
+        // Silencioso
       }
     }
   };
@@ -101,8 +107,8 @@ export default function SettingsModal({
         setSavedSuccess(false);
         onClose();
       }, 800);
-    } catch (err) {
-      console.warn('Erro ao atualizar perfil em Configurações:', err);
+    } catch {
+      // Silencioso
     } finally {
       setIsSaving(false);
     }
@@ -340,10 +346,8 @@ export default function SettingsModal({
             <button
               type="button"
               onClick={() => {
-                if (confirm('Deseja realmente sair da sua conta?')) {
-                  onLogout();
-                  onClose();
-                }
+                onClose();
+                onLogout();
               }}
               className="w-full py-2 px-3 rounded-lg border border-red-500/20 text-red-400 hover:bg-red-500/10 text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
             >

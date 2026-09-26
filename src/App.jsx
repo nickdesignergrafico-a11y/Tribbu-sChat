@@ -140,11 +140,11 @@ export default function App() {
                 navigate('/cadastro');
               }
             }
-          }, (err) => {
-            console.warn('[App.jsx] Consulta Firestore na coleção /users:', err);
+          }, () => {
+            // Silencioso caso offline
           });
-        } catch (err) {
-          console.warn('[App.jsx] Erro ao conectar listener Firestore:', err);
+        } catch {
+          // Silencioso
         }
       } else {
         // Usuário deslogado
@@ -240,12 +240,19 @@ export default function App() {
           navigate('/chat');
         }}
         onNavigate={navigate}
-        onCancel={() => {
+        onCancel={async () => {
+          try {
+            await signOut(auth);
+          } catch (_) {}
+          setCurrentUser(null);
+          setHasCompletedProfile(false);
+          setUserSession(null);
           setPendingCadastroUser(null);
           try {
             sessionStorage.removeItem('tribbu_pending_user');
+            localStorage.removeItem('tribbu_pending_phone');
           } catch (_) {}
-          navigate('/login');
+          await navigate('/login');
         }}
       />
     );

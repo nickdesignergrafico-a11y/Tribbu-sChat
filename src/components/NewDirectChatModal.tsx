@@ -90,8 +90,8 @@ export default function NewDirectChatModal({
           }
         });
         setRecentUsers(list);
-      } catch (err) {
-        console.error('Error loading registered users:', err);
+      } catch {
+        // Silencioso caso offline
       } finally {
         setIsLoadingRecent(false);
       }
@@ -188,7 +188,6 @@ export default function NewDirectChatModal({
         });
       }
     } catch (err: any) {
-      console.error('Error searching user:', err);
       setErrorMessage(err.message || 'Erro ao buscar usuário no Firestore.');
     } finally {
       setIsSearching(false);

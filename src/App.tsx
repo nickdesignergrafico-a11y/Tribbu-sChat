@@ -6,6 +6,7 @@ import {
   doc, 
   getDoc, 
   setDoc, 
+  deleteDoc,
   getDocs, 
   onSnapshot, 
   query, 
@@ -49,13 +50,28 @@ export function isSamePhoneNumber(a?: string, b?: string): boolean {
   return false;
 }
 
+function getDeletedMessageIds(): Set<string> {
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = localStorage.getItem('zapchat_deleted_messages');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return new Set(parsed);
+      }
+    } catch (_) {}
+  }
+  return new Set();
+}
+
 // Helper to strictly deduplicate messages by ID or by same-sender content within a 5-second window
-function deduplicateMessages(messages: Message[]): Message[] {
+function deduplicateMessages(messages: Message[], deletedIds?: Set<string>): Message[] {
   const seenIds = new Set<string>();
+  const hiddenIds = deletedIds || getDeletedMessageIds();
   const result: Message[] = [];
 
   for (const msg of messages) {
     if (!msg || !msg.id) continue;
+    if (hiddenIds.has(msg.id)) continue;
     if (seenIds.has(msg.id)) continue;
 
     // Check for near-identical duplicate from same sender (e.g. optimistic vs server vs firestore)
@@ -132,7 +148,7 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
     }
     return [TRIBBU_AI_CHAT];
   });
-  const [activeChatId, setActiveChatId] = useState<string | null>(TRIBBU_AI_CHAT_ID);
+  const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [mobileShowChat, setMobileShowChat] = useState<boolean>(false);
   const [isInitializing, setIsInitializing] = useState<boolean>(false);
   const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<any>(null);
@@ -330,7 +346,7 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
                 if (window.location.pathname === '/login') {
                   navigate('/chat');
                 }
-              } else {
+              } else if (!existingSession) {
                 // Perfil pendente na coleção /users: a coordenação de rotas é tratada pelo App.jsx
                 setUser(null);
               }
@@ -342,7 +358,7 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
         } catch {
           // Silencioso
         }
-      } else {
+      } else if (!userSession) {
         setUser(null);
       }
       setIsInitializing(false);
@@ -595,9 +611,18 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
       const q = query(messagesRef, orderBy('timestamp', 'asc'));
 
       const unsubscribe = onSnapshot(q, (snapshot) => {
-        if (snapshot.empty) return;
+        const removedIds = new Set<string>();
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === 'removed') {
+            removedIds.add(change.doc.id);
+          }
+        });
+
+        if (snapshot.empty && removedIds.size === 0) return;
+        const hiddenIds = getDeletedMessageIds();
         const firestoreMsgs: Message[] = [];
         snapshot.forEach((docSnap) => {
+          if (hiddenIds.has(docSnap.id) || removedIds.has(docSnap.id)) return;
           const data = docSnap.data();
           firestoreMsgs.push({
             id: docSnap.id,
@@ -623,18 +648,24 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
           });
         });
 
-        if (firestoreMsgs.length > 0) {
+        if (firestoreMsgs.length > 0 || removedIds.size > 0) {
           setChats(prev => {
-            return prev.map(c => {
+            const next = prev.map(c => {
               if (c.id === activeChatId) {
-                const currentMsgs = Array.isArray(c.messages) ? c.messages : [];
+                const currentMsgs = (Array.isArray(c.messages) ? c.messages : []).filter(
+                  m => !removedIds.has(m.id) && !hiddenIds.has(m.id)
+                );
                 return {
                   ...c,
-                  messages: deduplicateMessages([...currentMsgs, ...firestoreMsgs])
+                  messages: deduplicateMessages([...currentMsgs, ...firestoreMsgs], hiddenIds)
                 };
               }
               return c;
             });
+            try {
+              localStorage.setItem('zapchat_local_chats', JSON.stringify(next));
+            } catch (_) {}
+            return next;
           });
         }
       }, () => {
@@ -651,7 +682,7 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
     setUser(session);
     localStorage.setItem('zapchat_user', JSON.stringify(session));
     localStorage.setItem('zapchat_token', token);
-    setActiveChatId(TRIBBU_AI_CHAT_ID);
+    setActiveChatId(null);
     setMobileShowChat(false);
     navigate('/chat');
   };
@@ -771,8 +802,8 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
         lastMessageTimestamp: nowTimestamp,
         updatedAt: nowTimestamp
       }, { merge: true });
-    } catch (err) {
-      console.warn('Firestore message save notice:', err);
+    } catch {
+      // Fallback silencioso caso offline ou sem permissão
     }
 
     // C. Send message to backend Express server with the SAME messageId
@@ -879,8 +910,8 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
               lastMessageTimestamp: aiTimestamp,
               updatedAt: aiTimestamp
             }, { merge: true });
-          } catch (fsErr) {
-            console.warn('Firestore AI save fallback:', fsErr);
+          } catch {
+            // Fallback silencioso
           }
 
           // Also save in local server if running
@@ -916,12 +947,56 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
             } catch (_) {}
             return next;
           });
-        } catch (aiErr) {
-          console.error('Error generating AI response:', aiErr);
+        } catch {
           setChats(prev => prev.map(c => (c.id === activeChatId ? { ...c, statusText: 'Tribbu AI • Assistente Inteligente Online' } : c)));
         }
       })();
     }
+  };
+
+  const handleDeleteMessage = async (messageId: string) => {
+    if (!activeChatId || !messageId) return;
+
+    // 1. Persist deleted ID locally so sync/polling never resurrects it
+    const deletedSet = getDeletedMessageIds();
+    deletedSet.add(messageId);
+    try {
+      localStorage.setItem('zapchat_deleted_messages', JSON.stringify(Array.from(deletedSet)));
+    } catch (_) {}
+
+    // 2. Immediately remove from state and localStorage
+    setChats(prev => {
+      const next = prev.map(c => {
+        if (c.id === activeChatId) {
+          const filtered = (Array.isArray(c.messages) ? c.messages : []).filter(m => m.id !== messageId);
+          return {
+            ...c,
+            messages: filtered
+          };
+        }
+        return c;
+      });
+      try {
+        localStorage.setItem('zapchat_local_chats', JSON.stringify(next));
+      } catch (_) {}
+      return next;
+    });
+
+    // 3. Delete from Firestore subcollection
+    try {
+      await deleteDoc(doc(db, 'chats', activeChatId, 'messages', messageId));
+    } catch {
+      // Silencioso
+    }
+
+    // 4. Delete from Express backend if running
+    try {
+      const token = localStorage.getItem('zapchat_token');
+      await fetch(`/api/chats/${activeChatId}/messages/${messageId}`, {
+        method: 'DELETE',
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+      });
+    } catch (_) {}
   };
 
   const handleSendAttachment = (type: 'image' | 'document' | 'location' | 'contact' | 'video') => {
@@ -1099,8 +1174,8 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
           status: 'sent'
         });
       }
-    } catch (e) {
-      console.error('Error creating chat in Firestore:', e);
+    } catch {
+      // Silencioso caso offline
     }
 
     setChats(prev => {
@@ -1286,29 +1361,35 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
         const authPhotoUrl = (storagePhotoUrl && storagePhotoUrl.startsWith('http')) 
           ? storagePhotoUrl 
           : (user.photoURL && user.photoURL.startsWith('http') ? user.photoURL : undefined);
-        await updateProfile(auth.currentUser, {
-          displayName: updated.displayName || user.displayName,
-          photoURL: authPhotoUrl
-        });
+        await Promise.race([
+          updateProfile(auth.currentUser, {
+            displayName: updated.displayName || user.displayName,
+            photoURL: authPhotoUrl
+          }),
+          new Promise(r => setTimeout(r, 1500))
+        ]);
       }
     } catch {
       // Handled silently
     }
 
-    // Update in Firestore users collection
+    // Update in Firestore users collection with non-blocking timeout so UI never hangs on Netlify
     if (uid) {
       try {
         const photoVal = storagePhotoUrl !== undefined ? (storagePhotoUrl || null) : (user.photoURL || null);
-        await setDoc(doc(db, 'users', uid), {
-          phoneNumber: updated.phoneNumber !== undefined ? updated.phoneNumber : (user.phoneNumber || null),
-          displayName: updated.displayName || user.displayName || user.phoneNumber,
-          initial: updated.initial || user.initial,
-          avatarColor: user.avatarColor,
-          photoURL: photoVal,
-          updatedAt: new Date().toISOString()
-        }, { merge: true });
-      } catch (err) {
-        console.warn('[App] Erro ao sincronizar perfil no Firestore:', err);
+        await Promise.race([
+          setDoc(doc(db, 'users', uid), {
+            phoneNumber: updated.phoneNumber !== undefined ? updated.phoneNumber : (user.phoneNumber || null),
+            displayName: updated.displayName || user.displayName || user.phoneNumber,
+            initial: updated.initial || user.initial,
+            avatarColor: user.avatarColor,
+            photoURL: photoVal,
+            updatedAt: new Date().toISOString()
+          }, { merge: true }),
+          new Promise(r => setTimeout(r, 1800))
+        ]);
+      } catch {
+        // Silencioso caso offline
       }
     }
   };
@@ -1357,7 +1438,11 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
             currentUser={user}
             onSendMessage={handleSendMessage}
             onSendAttachment={handleSendAttachment}
-            onBackToSidebar={() => setMobileShowChat(false)}
+            onDeleteMessage={handleDeleteMessage}
+            onBackToSidebar={() => {
+              setMobileShowChat(false);
+              setActiveChatId(null);
+            }}
             onRevokeInvite={handleRevokeInvite}
           />
         </div>

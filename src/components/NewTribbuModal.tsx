@@ -95,8 +95,8 @@ export default function NewTribbuModal({
           }
         });
         setAllUsers(users);
-      } catch (err: any) {
-        console.error('Error loading users for group:', err);
+      } catch {
+        // Silencioso caso offline
       } finally {
         setIsLoadingUsers(false);
       }
@@ -126,8 +126,7 @@ export default function NewTribbuModal({
     try {
       const url = await uploadProfilePhoto(currentUser.uid || `tribbu_${Date.now()}`, file);
       setPhotoURL(url);
-    } catch (err: any) {
-      console.error('Error uploading group photo:', err);
+    } catch {
       // Fallback: direct base64 data URL
       const reader = new FileReader();
       reader.onload = () => {
@@ -180,7 +179,6 @@ export default function NewTribbuModal({
 
       onClose();
     } catch (err: any) {
-      console.error('Error creating group:', err);
       setError(err.message || 'Falha ao criar Tribbu.');
     } finally {
       setIsSubmitting(false);

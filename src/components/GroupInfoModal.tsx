@@ -83,9 +83,6 @@ export default function GroupInfoModal({
 
   const handleRevoke = async () => {
     if (!onRevokeInvite) return;
-    if (!confirm('Deseja realmente redefinir o link de convite? O link anterior deixará de funcionar imediatamente.')) {
-      return;
-    }
 
     setIsRevoking(true);
     try {

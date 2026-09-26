@@ -212,8 +212,10 @@ export default function Sidebar({
     setShowStatusViewer(false);
   };
 
-  // Filter chats by tab, filter pills, and search
+  // Filter chats by tab, filter pills, and search (excluding Tribbu AI since it floats as a lateral icon)
   const filteredChats = chats.filter((chat) => {
+    if (chat.isAI || chat.id === 'tribbu-ai') return false;
+
     // Search matching
     const matchesSearch = chat.name.toLowerCase().includes(searchTerm.toLowerCase());
     if (!matchesSearch) return false;
@@ -235,17 +237,16 @@ export default function Sidebar({
   });
 
   const directChats = useMemo(() => {
-    const direct = filteredChats.filter(c => !c.isGroup && !c.isCommunity);
-    const aiChat = direct.find(c => c.isAI || c.id === 'tribbu-ai');
-    const others = direct.filter(c => !c.isAI && c.id !== 'tribbu-ai');
-    return aiChat ? [aiChat, ...others] : others;
+    return filteredChats.filter(c => !c.isGroup && !c.isCommunity && !c.isAI && c.id !== 'tribbu-ai');
   }, [filteredChats]);
 
   const groupChats = useMemo(() => {
     return filteredChats.filter(c => c.isGroup || c.isCommunity);
   }, [filteredChats]);
 
-  const totalUnread = chats.reduce((acc, c) => acc + (c.unreadCount || 0), 0);
+  const totalUnread = chats
+    .filter(c => !c.isAI && c.id !== 'tribbu-ai')
+    .reduce((acc, c) => acc + (c.unreadCount || 0), 0);
 
   const handleToggleSearch = () => {
     setIsSearchOpen((prev) => {
@@ -266,6 +267,8 @@ export default function Sidebar({
     avatarColor: string;
     avatarLetter: string;
   }) => {
+    setActiveTab('chats');
+    setActiveFilter('all');
     onAddNewChat(contact.name, false, {
       contactPhoneNumber: contact.phoneNumber,
       photoURL: contact.photoURL,
@@ -284,6 +287,8 @@ export default function Sidebar({
     members: string[];
     description?: string;
   }) => {
+    setActiveTab('chats');
+    setActiveFilter('all');
     onAddNewChat(groupData.name, true, {
       photoURL: groupData.photoURL,
       avatarColor: groupData.avatarColor,
@@ -297,6 +302,8 @@ export default function Sidebar({
   const handleCreateChatSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (newChatName.trim()) {
+      setActiveTab('chats');
+      setActiveFilter('all');
       onAddNewChat(newChatName.trim(), isGroupChat);
       setNewChatName('');
       setIsGroupChat(false);
@@ -305,7 +312,9 @@ export default function Sidebar({
   };
 
   const handleCreateCommunitySubmit = (name: string, description: string) => {
-    onAddNewChat(name, true);
+    setActiveTab('chats');
+    setActiveFilter('all');
+    onAddNewChat(name, true, { description });
     setShowCommunityModal(false);
   };
 
@@ -481,6 +490,7 @@ export default function Sidebar({
                   <button
                     onClick={() => {
                       setShowMenu(false);
+                      setActiveTab('chats');
                       setActiveFilter(activeFilter === 'favorites' ? 'all' : 'favorites');
                     }}
                     className="w-full text-left px-4 py-2.5 hover:bg-white/10 flex items-center gap-3 cursor-pointer text-white/90 hover:text-white"
@@ -522,9 +532,7 @@ export default function Sidebar({
                   <button
                     onClick={() => {
                       setShowMenu(false);
-                      if (confirm('Deseja realmente sair do Tribbu\'sChat?')) {
-                        onLogout();
-                      }
+                      onLogout();
                     }}
                     className="w-full text-left px-4 py-2.5 hover:bg-red-500/10 text-red-400 flex items-center gap-3 cursor-pointer border-t border-white/10"
                   >
@@ -600,9 +608,13 @@ export default function Sidebar({
       {/* Filter Pills: Todas, Individuais, Tribbus, Não lidas, Favoritas */}
       <div className="px-3.5 py-2 flex items-center gap-1.5 overflow-x-auto no-scrollbar border-b border-white/5 flex-shrink-0 bg-slate-900/40">
         <button
-          onClick={() => setActiveFilter('all')}
+          type="button"
+          onClick={() => {
+            setActiveTab('chats');
+            setActiveFilter('all');
+          }}
           className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-all cursor-pointer ${
-            activeFilter === 'all'
+            activeFilter === 'all' && activeTab === 'chats'
               ? 'bg-cyan-500/25 text-cyan-300 border border-cyan-400/50 font-bold shadow-sm shadow-cyan-500/20'
               : 'bg-white/5 text-white/70 hover:bg-white/10 hover:text-white border border-transparent'
           }`}
@@ -610,9 +622,13 @@ export default function Sidebar({
           Todas
         </button>
         <button
-          onClick={() => setActiveFilter('direct')}
+          type="button"
+          onClick={() => {
+            setActiveTab('chats');
+            setActiveFilter('direct');
+          }}
           className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-all cursor-pointer ${
-            activeFilter === 'direct'
+            activeFilter === 'direct' && activeTab === 'chats'
               ? 'bg-cyan-500/25 text-cyan-300 border border-cyan-400/50 font-bold shadow-sm shadow-cyan-500/20'
               : 'bg-white/5 text-white/70 hover:bg-white/10 hover:text-white border border-transparent'
           }`}
@@ -620,9 +636,13 @@ export default function Sidebar({
           Individuais {chats.filter(c => !c.isGroup && !c.isCommunity).length > 0 && `(${chats.filter(c => !c.isGroup && !c.isCommunity).length})`}
         </button>
         <button
-          onClick={() => setActiveFilter('groups')}
+          type="button"
+          onClick={() => {
+            setActiveTab('chats');
+            setActiveFilter('groups');
+          }}
           className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-all cursor-pointer ${
-            activeFilter === 'groups'
+            activeFilter === 'groups' && activeTab === 'chats'
               ? 'bg-teal-500/25 text-teal-300 border border-teal-400/50 font-bold shadow-sm shadow-teal-500/20'
               : 'bg-white/5 text-white/70 hover:bg-white/10 hover:text-white border border-transparent'
           }`}
@@ -630,9 +650,13 @@ export default function Sidebar({
           Tribbus {chats.filter(c => c.isGroup || c.isCommunity).length > 0 && `(${chats.filter(c => c.isGroup || c.isCommunity).length})`}
         </button>
         <button
-          onClick={() => setActiveFilter('unread')}
+          type="button"
+          onClick={() => {
+            setActiveTab('chats');
+            setActiveFilter('unread');
+          }}
           className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-all cursor-pointer ${
-            activeFilter === 'unread'
+            activeFilter === 'unread' && activeTab === 'chats'
               ? 'bg-cyan-500/25 text-cyan-300 border border-cyan-400/50 font-bold shadow-sm shadow-cyan-500/20'
               : 'bg-white/5 text-white/70 hover:bg-white/10 hover:text-white border border-transparent'
           }`}
@@ -640,9 +664,13 @@ export default function Sidebar({
           Não lidas {totalUnread > 0 && `(${totalUnread})`}
         </button>
         <button
-          onClick={() => setActiveFilter('favorites')}
+          type="button"
+          onClick={() => {
+            setActiveTab('chats');
+            setActiveFilter('favorites');
+          }}
           className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-all cursor-pointer ${
-            activeFilter === 'favorites'
+            activeFilter === 'favorites' && activeTab === 'chats'
               ? 'bg-cyan-500/25 text-cyan-300 border border-cyan-400/50 font-bold shadow-sm shadow-cyan-500/20'
               : 'bg-white/5 text-white/70 hover:bg-white/10 hover:text-white border border-transparent'
           }`}
@@ -781,7 +809,10 @@ export default function Sidebar({
 
             {/* Archived chats row */}
             <div 
-              onClick={() => alert('Conversas arquivadas: Nenhuma conversa arquivada no momento.')}
+              onClick={() => {
+                setCameraFeedback('Nenhuma conversa arquivada no momento.');
+                setTimeout(() => setCameraFeedback(null), 2500);
+              }}
               className="flex items-center gap-4 px-4 py-3 hover:bg-white/5 cursor-pointer border-b border-white/5 text-white/80 transition-colors"
             >
               <div className="w-10 h-10 rounded-full flex items-center justify-center text-cyan-400 bg-cyan-500/10">
@@ -1204,33 +1235,40 @@ export default function Sidebar({
           </div>
         )}
 
-        {/* Communities Tab Content */}
+        {/* Criar Tribbu Tab Content */}
         {activeTab === 'communities' && (
           <div className="p-4 space-y-4">
             <div 
-              onClick={() => setShowCommunityModal(true)}
+              onClick={() => setShowNewTribbuModal(true)}
               className="flex items-center gap-3 p-3.5 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 hover:bg-cyan-500/20 cursor-pointer transition-colors"
             >
               <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-cyan-400 to-emerald-400 text-slate-950 font-bold flex items-center justify-center shadow-md">
                 <Users className="w-6 h-6" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="font-bold text-sm text-white">Nova comunidade</p>
-                <p className="text-xs text-cyan-200/80">Reúna seus grupos em um único espaço</p>
+                <p className="font-bold text-sm text-white">Criar Tribbu</p>
+                <p className="text-xs text-cyan-200/80">Crie um novo grupo ou Tribbu com seus contatos</p>
               </div>
             </div>
 
             <div className="pt-2">
-              <p className="text-xs font-semibold text-white/40 uppercase tracking-wider mb-2">Suas comunidades</p>
-              {chats.filter(c => c.isCommunity).length > 0 ? (
-                chats.filter(c => c.isCommunity).map(com => (
+              <p className="text-xs font-semibold text-white/40 uppercase tracking-wider mb-2">Suas Tribbus</p>
+              {chats.filter(c => c.isGroup || c.isCommunity).length > 0 ? (
+                chats.filter(c => c.isGroup || c.isCommunity).map(com => (
                   <div 
                     key={com.id}
-                    onClick={() => onSelectChat(com.id)}
+                    onClick={() => {
+                      setActiveTab('chats');
+                      onSelectChat(com.id);
+                    }}
                     className="p-3 rounded-xl bg-white/5 hover:bg-white/10 cursor-pointer flex items-center gap-3 mb-2"
                   >
-                    <div className="w-10 h-10 rounded-xl bg-cyan-500/20 text-cyan-300 flex items-center justify-center font-bold">
-                      {com.avatarLetter}
+                    <div className="w-10 h-10 rounded-xl bg-cyan-500/20 text-cyan-300 flex items-center justify-center font-bold overflow-hidden">
+                      {com.photoURL ? (
+                        <img src={com.photoURL} alt={com.name} className="w-full h-full object-cover" />
+                      ) : (
+                        com.avatarLetter
+                      )}
                     </div>
                     <div>
                       <p className="text-sm font-semibold text-white">{com.name}</p>
@@ -1239,7 +1277,7 @@ export default function Sidebar({
                   </div>
                 ))
               ) : (
-                <p className="text-xs text-white/40 italic">Você ainda não faz parte de nenhuma comunidade.</p>
+                <p className="text-xs text-white/40 italic">Você ainda não faz parte de nenhuma Tribbu.</p>
               )}
             </div>
           </div>
@@ -1259,23 +1297,36 @@ export default function Sidebar({
         )}
       </div>
 
-      {/* Floating Action Button (FAB) at Bottom Right */}
+      {/* Floating Tribbu AI Icon & Action Button (FAB) at Bottom Right */}
       {activeTab === 'chats' && (
-        <button
-          type="button"
-          onClick={() => {
-            setIsGroupChat(false);
-            setShowNewChatModal(true);
-          }}
-          className="absolute bottom-20 right-4 w-14 h-14 bg-gradient-to-r from-cyan-400 via-teal-400 to-emerald-400 hover:from-cyan-300 hover:to-emerald-300 active:scale-95 text-slate-950 rounded-2xl shadow-xl flex items-center justify-center cursor-pointer transition-all shadow-cyan-500/30 hover:shadow-cyan-400/50 z-30 font-bold"
-          title="Nova conversa"
-          id="fabNewChatBtn"
-        >
-          <MessageSquarePlus className="w-6 h-6 stroke-[2.4]" />
-        </button>
+        <div className="absolute bottom-20 right-4 flex flex-col items-center gap-3 z-30">
+          <button
+            type="button"
+            onClick={() => onSelectChat('tribbu-ai')}
+            className="w-12 h-12 rounded-full bg-gradient-to-br from-cyan-950 via-[#041a24] to-slate-950 flex items-center justify-center relative border-2 border-cyan-400 shadow-[0_0_16px_rgba(6,182,212,0.65)] hover:scale-105 active:scale-95 transition-all cursor-pointer"
+            title="Abrir chat com a Tribbu AI"
+            id="fabTribbuAiBtn"
+          >
+            <Bot className="w-6 h-6 text-cyan-300 drop-shadow-[0_0_10px_rgba(6,182,212,1)] stroke-[2.4]" />
+            <span className="absolute bottom-0 right-0 w-3 h-3 bg-cyan-400 border-2 border-slate-950 rounded-full shadow-[0_0_8px_rgba(6,182,212,1)] animate-pulse" />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setIsGroupChat(false);
+              setShowNewChatModal(true);
+            }}
+            className="w-14 h-14 bg-gradient-to-r from-cyan-400 via-teal-400 to-emerald-400 hover:from-cyan-300 hover:to-emerald-300 active:scale-95 text-slate-950 rounded-2xl shadow-xl flex items-center justify-center cursor-pointer transition-all shadow-cyan-500/30 hover:shadow-cyan-400/50 font-bold"
+            title="Nova conversa"
+            id="fabNewChatBtn"
+          >
+            <MessageSquarePlus className="w-6 h-6 stroke-[2.4]" />
+          </button>
+        </div>
       )}
 
-      {/* Bottom Navigation Bar (Conversas, Status, Comunidades, Ligações) */}
+      {/* Bottom Navigation Bar (Conversas, Status, Criar Tribbu, Ligações) */}
       <div className="h-16 bg-slate-950/95 border-t border-white/10 px-4 flex items-center justify-around flex-shrink-0 z-30">
         {/* Conversas Tab */}
         <button
@@ -1310,17 +1361,20 @@ export default function Sidebar({
           <span className="text-[11px] font-semibold mt-1">Status</span>
         </button>
 
-        {/* Comunidades Tab */}
+        {/* Criar Tribbu Tab */}
         <button
           type="button"
-          onClick={() => setActiveTab('communities')}
+          onClick={() => {
+            setActiveTab('communities');
+            setShowNewTribbuModal(true);
+          }}
           className={`flex flex-col items-center justify-center py-1 px-3 rounded-xl transition-colors cursor-pointer ${
             activeTab === 'communities' ? 'text-cyan-400 font-semibold' : 'text-white/50 hover:text-white'
           }`}
-          title="Comunidades"
+          title="Criar Tribbu"
         >
           <Users className="w-5 h-5 stroke-[2.2]" />
-          <span className="text-[11px] font-semibold mt-1">Comunidades</span>
+          <span className="text-[11px] font-semibold mt-1">Criar Tribbu</span>
         </button>
 
         {/* Ligações Tab */}

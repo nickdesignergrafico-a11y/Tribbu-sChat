@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Camera, Upload, Trash2, User, Phone, CheckCircle2, Sparkles, MessageSquare, ArrowLeft } from 'lucide-react';
-import { updateProfile } from 'firebase/auth';
+import { updateProfile, signOut } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import CameraCaptureModal from './CameraCaptureModal';
@@ -91,23 +91,15 @@ export default function Cadastro({ user, onComplete, onNavigate, onCancel }) {
 
     try {
       const activeUser = auth.currentUser;
-      const targetUid = activeUser?.uid || user?.uid || initialUid;
-
-      if (!targetUid) {
-        setError('Por favor, faça a validação do seu número por SMS no login antes de criar o perfil.');
-        setIsSubmitting(false);
-        return;
-      }
-
       const cleanPhone = activeUser?.phoneNumber || phone || user?.phoneNumber || '+5511999999999';
+      const targetUid = activeUser?.uid || user?.uid || initialUid || `user_${cleanPhone.replace(/\D/g, '') || Date.now()}`;
 
       // 1. Upload foto de perfil para o Firebase Storage se o usuário escolheu uma imagem
       let finalPhotoURL = null;
       if (photoURL) {
         try {
           finalPhotoURL = await uploadProfilePhoto(targetUid, photoURL);
-        } catch (storageErr) {
-          console.warn('[Cadastro] Falha no upload ao Firebase Storage, usando representação inline:', storageErr);
+        } catch {
           finalPhotoURL = photoURL;
         }
       }
@@ -123,12 +115,15 @@ export default function Cadastro({ user, onComplete, onNavigate, onCancel }) {
       if (activeUser) {
         try {
           const authPhotoUrl = (finalPhotoURL && finalPhotoURL.startsWith('http')) ? finalPhotoURL : undefined;
-          await updateProfile(activeUser, {
-            displayName: trimmedName,
-            photoURL: authPhotoUrl
-          });
-        } catch (authErr) {
-          console.warn('[Cadastro] Erro ao atualizar profile auth:', authErr);
+          await Promise.race([
+            updateProfile(activeUser, {
+              displayName: trimmedName,
+              photoURL: authPhotoUrl
+            }),
+            new Promise((r) => setTimeout(r, 1500))
+          ]);
+        } catch {
+          // Silencioso
         }
       }
 
@@ -148,7 +143,14 @@ export default function Cadastro({ user, onComplete, onNavigate, onCancel }) {
       };
 
       const userDocRef = doc(db, 'users', targetUid);
-      await setDoc(userDocRef, userProfileData, { merge: true });
+      try {
+        await Promise.race([
+          setDoc(userDocRef, userProfileData, { merge: true }),
+          new Promise((r) => setTimeout(r, 1800))
+        ]);
+      } catch {
+        // Silencioso
+      }
 
       // Sincroniza com API backend se disponível (com timeout de 2s para evitar travar na Netlify)
       let serverToken = '';
@@ -211,7 +213,6 @@ export default function Cadastro({ user, onComplete, onNavigate, onCancel }) {
       }
 
     } catch (err) {
-      console.error('[Cadastro] Erro ao salvar cadastro no Firestore:', err);
       setError(err?.message || 'Erro ao salvar os dados do perfil. Tente novamente.');
       setIsSubmitting(false);
     }
@@ -476,14 +477,20 @@ export default function Cadastro({ user, onComplete, onNavigate, onCancel }) {
           <div className="text-center pt-1">
             <button
               type="button"
-              onClick={() => {
+              onClick={async () => {
+                try {
+                  sessionStorage.removeItem('tribbu_pending_user');
+                  localStorage.removeItem('tribbu_pending_phone');
+                  await signOut(auth);
+                } catch (_) {}
                 if (onCancel) {
                   onCancel();
                 } else if (onNavigate) {
                   onNavigate('/login');
                 } else if (typeof window !== 'undefined') {
                   window.history.pushState(null, '', '/login');
-                  window.location.reload();
+                  window.dispatchEvent(new Event('popstate'));
+                  window.dispatchEvent(new CustomEvent('app-route-change', { detail: '/login' }));
                 }
               }}
               className="text-xs text-white/40 hover:text-white/80 transition-colors cursor-pointer inline-flex items-center gap-1"

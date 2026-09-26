@@ -183,6 +183,7 @@ export default function Contatos({
   // Lógica de Cruzamento de Dados:
   // Escuta em tempo real a coleção /users do Firestore e mapeia por telefone normalizado
   useEffect(() => {
+    if (!isOpen) return;
     let isMounted = true;
     try {
       const q = query(collection(db, 'users'));
@@ -223,8 +224,7 @@ export default function Contatos({
           setRegisteredUsersMap(userMap);
           setIsLoadingFirestore(false);
         },
-        (error) => {
-          console.warn('[Contatos] Conexão com Firestore /users:', error);
+        () => {
           if (isMounted) setIsLoadingFirestore(false);
         }
       );
@@ -233,11 +233,10 @@ export default function Contatos({
         isMounted = false;
         unsubscribe();
       };
-    } catch (err) {
-      console.warn('[Contatos] Falha ao inicializar listener de /users:', err);
+    } catch {
       setIsLoadingFirestore(false);
     }
-  }, []);
+  }, [isOpen]);
 
   // Helper para checagem rápida se um número de telefone está cadastrado no Firestore
   const checkIsTribbuUser = (phone) => {
