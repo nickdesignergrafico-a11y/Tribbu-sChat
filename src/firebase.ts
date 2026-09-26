@@ -28,6 +28,10 @@ export const db = firebaseConfig.firestoreDatabaseId && firebaseConfig.firestore
 
 // Export Firebase Storage
 export const storage = getStorage(app);
+try {
+  storage.maxUploadRetryTime = 2500;
+  storage.maxOperationRetryTime = 2500;
+} catch (_) {}
 
 // Validate Connection to Firestore silently at boot if online
 async function testConnection() {

@@ -103,13 +103,14 @@ export default function OnboardingScreen({ user, onComplete, onCancel }: Onboard
       const nowTimestamp = Date.now();
       const nowIso = new Date().toISOString();
 
-      // 3. Atualiza o perfil no Firebase Auth
+      // 3. Atualiza o perfil no Firebase Auth (apenas URL remota para respeitar limite do Firebase Auth)
       const currentUser = auth.currentUser;
       if (currentUser) {
         try {
+          const authPhotoUrl = (finalPhotoURL && finalPhotoURL.startsWith('http')) ? finalPhotoURL : undefined;
           await updateProfile(currentUser, {
             displayName: trimmedName,
-            photoURL: finalPhotoURL || undefined
+            photoURL: authPhotoUrl
           });
         } catch (authErr) {
           console.warn('Erro ao atualizar auth profile:', authErr);
@@ -133,17 +134,21 @@ export default function OnboardingScreen({ user, onComplete, onCancel }: Onboard
       const userDocRef = doc(db, 'users', user.uid);
       await setDoc(userDocRef, userProfileData, { merge: true });
 
-      // 5. Sincroniza sessão com a API do servidor Express
+      // 5. Sincroniza sessão com a API do servidor Express (com timeout de 2s para evitar travar na Netlify)
       let serverToken = '';
       try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2000);
         const res = await fetch('/api/auth/phone-login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             phoneNumber: cleanPhone,
             displayName: trimmedName
-          })
+          }),
+          signal: controller.signal
         });
+        clearTimeout(timeoutId);
         if (res.ok) {
           const data = await res.json();
           serverToken = data.token;

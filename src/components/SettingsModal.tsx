@@ -94,15 +94,15 @@ export default function SettingsModal({
       await onUpdateProfile({
         displayName: displayName.trim() || user.phoneNumber,
         phoneNumber: phoneNumber.trim() || user.phoneNumber,
-        photoURL: photoURL || undefined
+        photoURL: photoURL !== undefined ? (photoURL || '') : undefined
       });
       setSavedSuccess(true);
       setTimeout(() => {
         setSavedSuccess(false);
         onClose();
       }, 800);
-    } catch {
-      // Graceful fallback
+    } catch (err) {
+      console.warn('Erro ao atualizar perfil em Configurações:', err);
     } finally {
       setIsSaving(false);
     }

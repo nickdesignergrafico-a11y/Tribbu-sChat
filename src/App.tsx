@@ -1280,12 +1280,15 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
       localStorage.setItem('zapchat_user', JSON.stringify(updatedUser));
     } catch (_) {}
 
-    // Update in Firebase Auth
+    // Update in Firebase Auth (only set photoURL if it's a valid remote HTTP URL to prevent length limit issues)
     try {
       if (auth.currentUser) {
+        const authPhotoUrl = (storagePhotoUrl && storagePhotoUrl.startsWith('http')) 
+          ? storagePhotoUrl 
+          : (user.photoURL && user.photoURL.startsWith('http') ? user.photoURL : undefined);
         await updateProfile(auth.currentUser, {
           displayName: updated.displayName || user.displayName,
-          photoURL: storagePhotoUrl !== undefined ? storagePhotoUrl : user.photoURL
+          photoURL: authPhotoUrl
         });
       }
     } catch {
@@ -1295,16 +1298,17 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
     // Update in Firestore users collection
     if (uid) {
       try {
+        const photoVal = storagePhotoUrl !== undefined ? (storagePhotoUrl || null) : (user.photoURL || null);
         await setDoc(doc(db, 'users', uid), {
           phoneNumber: updated.phoneNumber !== undefined ? updated.phoneNumber : (user.phoneNumber || null),
           displayName: updated.displayName || user.displayName || user.phoneNumber,
           initial: updated.initial || user.initial,
           avatarColor: user.avatarColor,
-          photoURL: storagePhotoUrl !== undefined ? storagePhotoUrl : (user.photoURL || null),
+          photoURL: photoVal,
           updatedAt: new Date().toISOString()
         }, { merge: true });
-      } catch {
-        // Handled silently
+      } catch (err) {
+        console.warn('[App] Erro ao sincronizar perfil no Firestore:', err);
       }
     }
   };

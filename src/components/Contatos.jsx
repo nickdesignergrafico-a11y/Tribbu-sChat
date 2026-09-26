@@ -116,13 +116,7 @@ export function formatPhone(phone) {
   return `+${phone}`;
 }
 
-const DEFAULT_LOCAL_CONTACTS = [
-  { id: 'c1', name: 'Lucas Silva', phone: '+5511988887777', note: 'Desenvolvedor' },
-  { id: 'c2', name: 'Mariana Souza', phone: '+5521977776666', note: 'Design e UX' },
-  { id: 'c3', name: 'Carlos Eduardo', phone: '+5563992624090', note: 'Tribbu Core' },
-  { id: 'c4', name: 'Beatriz Costa', phone: '+5531966665555', note: 'Comunidade' },
-  { id: 'c5', name: 'Gabriel Santos', phone: '+5541955554444', note: 'Marketing' }
-];
+const DEFAULT_LOCAL_CONTACTS = [];
 
 /**
  * @param {{
@@ -142,14 +136,22 @@ export default function Contatos({
 }) {
   const { logoUrl } = useBranding();
 
-  // Lista local de contatos mantida no localStorage
+  // Lista local de contatos reais mantida no localStorage (apenas contatos reais adicionados pelo usuário)
   const [contacts, setContacts] = useState(() => {
     try {
       const saved = localStorage.getItem('tribbus_contacts');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+        if (Array.isArray(parsed)) {
+          // Remove contatos fictícios legados (c1, c2, c3, c4, c5)
+          const cleaned = parsed.filter(
+            (c) => !['c1', 'c2', 'c3', 'c4', 'c5'].includes(c.id) &&
+                   !['Lucas Silva', 'Mariana Souza', 'Carlos Eduardo', 'Beatriz Costa', 'Gabriel Santos'].includes(c.name)
+          );
+          if (cleaned.length !== parsed.length) {
+            localStorage.setItem('tribbus_contacts', JSON.stringify(cleaned));
+          }
+          return cleaned;
         }
       }
     } catch (_) {}

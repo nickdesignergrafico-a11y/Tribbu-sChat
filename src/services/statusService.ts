@@ -3,69 +3,10 @@ import { db } from '../firebase';
 import { StatusItem, UserStatusGroup, TextStatusStyle } from '../types';
 import { uploadStatusMedia } from './storageService';
 
-// Dynamic demo statuses with valid 24h expiration window
-export const getDemoStatuses = (): StatusItem[] => {
-  const now = Date.now();
-  return [
-    {
-      id: 'demo-status-1',
-      userId: 'user-lucas',
-      userName: 'Lucas Silva',
-      userPhone: '+55 11 98877-6655',
-      avatarColor: '#06B6D4',
-      mediaUrl: 'https://images.unsplash.com/photo-1518770660439-4636190af475?w=800&auto=format&fit=crop&q=80',
-      mediaType: 'image',
-      caption: 'Configurando a infraestrutura da nossa Tribbu! 🚀⚡',
-      timestamp: now - 1000 * 60 * 45, // 45 min ago
-      expiresAt: now + 1000 * 60 * 60 * 23.25
-    },
-    {
-      id: 'demo-status-2',
-      userId: 'user-mariana',
-      userName: 'Mariana Costa',
-      userPhone: '+55 21 97766-5544',
-      avatarColor: '#10B981',
-      mediaUrl: 'https://assets.mixkit.co/videos/preview/mixkit-tree-branches-in-the-breeze-1188-large.mp4',
-      mediaType: 'video',
-      caption: 'Pausa para um café e respirar ar puro 🌿☕',
-      timestamp: now - 1000 * 60 * 120, // 2 hours ago
-      expiresAt: now + 1000 * 60 * 60 * 22
-    },
-    {
-      id: 'demo-status-3',
-      userId: 'user-mariana',
-      userName: 'Mariana Costa',
-      userPhone: '+55 21 97766-5544',
-      avatarColor: '#10B981',
-      mediaUrl: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800&auto=format&fit=crop&q=80',
-      mediaType: 'image',
-      caption: 'Fim de tarde maravilhoso!',
-      timestamp: now - 1000 * 60 * 90,
-      expiresAt: now + 1000 * 60 * 60 * 22.5
-    },
-    {
-      id: 'demo-status-4',
-      userId: 'user-tribbu-hq',
-      userName: 'Tribbu Comunidade',
-      userPhone: '+55 11 99900-1122',
-      avatarColor: '#06B6D4',
-      mediaUrl: '',
-      mediaType: 'text',
-      textContent: '⚡ Bem-vindos aos canais da Tribbu! Este é um Aviso Oficial com validade de 24 horas. Fique atento às novidades da nossa comunidade.',
-      textStyle: {
-        themeId: 'tribbu-cyber',
-        fontFamily: 'sans',
-        badge: '📢 Aviso da Tribbu'
-      },
-      isTribbuNotice: true,
-      targetGroupName: 'Geral',
-      timestamp: now - 1000 * 60 * 30, // 30 min ago
-      expiresAt: now + 1000 * 60 * 60 * 23.5
-    }
-  ];
-};
+// No demo statuses - real user data only
+export const getDemoStatuses = (): StatusItem[] => [];
 
-export const DEMO_STATUSES = getDemoStatuses();
+export const DEMO_STATUSES: StatusItem[] = [];
 
 /**
  * Filter statuses that have not expired yet (strict 24-hour expiration rule)
@@ -276,28 +217,19 @@ export function subscribeToStatuses(callback: (statuses: StatusItem[]) => void):
           firestoreStatuses.push({ id: docSnap.id, ...docSnap.data() } as StatusItem);
         });
 
-        // Merge with fresh demo statuses
-        const demos = getDemoStatuses();
-        const combined = [...firestoreStatuses];
-        demos.forEach((demo) => {
-          if (!combined.some((s) => s.id === demo.id)) {
-            combined.push(demo);
-          }
-        });
-
         // Exclude expired (older than 24h)
-        const activeOnly = filterActiveStatuses(combined);
+        const activeOnly = filterActiveStatuses(firestoreStatuses);
         callback(activeOnly);
       },
       (error) => {
-        console.debug('[StatusService] Using demo fallback due to:', error);
-        callback(filterActiveStatuses(getDemoStatuses()));
+        console.debug('[StatusService] Firestore status error:', error);
+        callback([]);
       }
     );
 
     return unsubscribe;
   } catch {
-    callback(filterActiveStatuses(getDemoStatuses()));
+    callback([]);
     return () => {};
   }
 }

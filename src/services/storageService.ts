@@ -2,6 +2,32 @@ import { ref, uploadBytes, uploadBytesResumable, uploadString, getDownloadURL } 
 import { storage } from '../firebase';
 
 /**
+ * Flag to indicate if remote Firebase Storage bucket is available.
+ * If an operation fails with 404, network error, or timeout, this circuit-breaker
+ * enables immediate local/base64 fallback without stalling the UI.
+ */
+let storageUnavailable = false;
+
+function timeoutPromise<T>(ms: number, message = 'Storage timeout'): Promise<T> {
+  return new Promise((_, reject) => setTimeout(() => reject(new Error(message)), ms));
+}
+
+/**
+ * Helper to convert File/Blob to Data URL fallback
+ */
+function getFallbackDataUrl(fileOrDataUrl: File | Blob | string): Promise<string> {
+  if (typeof fileOrDataUrl === 'string') {
+    return Promise.resolve(fileOrDataUrl);
+  }
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve((reader.result as string) || '');
+    reader.onerror = () => resolve('');
+    reader.readAsDataURL(fileOrDataUrl);
+  });
+}
+
+/**
  * Helper to determine file size in human-readable string
  */
 export function formatBytes(bytes: number, decimals = 1): string {
@@ -16,43 +42,41 @@ export function formatBytes(bytes: number, decimals = 1): string {
 /**
  * Upload profile photo to Firebase Storage
  * Stored at: users/{userId}/profile_{timestamp}.jpg
- * Falls back to data URL if storage is unavailable.
+ * Falls back immediately to compressed data URL if storage bucket is unavailable or times out (max 2s).
  */
 export async function uploadProfilePhoto(
   userId: string,
   fileOrDataUrl: File | Blob | string
 ): Promise<string> {
+  if (storageUnavailable) {
+    return getFallbackDataUrl(fileOrDataUrl);
+  }
+
   try {
     const timestamp = Date.now();
     const storageRef = ref(storage, `users/${userId}/profile_${timestamp}.jpg`);
 
-    if (typeof fileOrDataUrl === 'string') {
-      if (fileOrDataUrl.startsWith('data:')) {
-        // Upload base64 data URL
-        const snapshot = await uploadString(storageRef, fileOrDataUrl, 'data_url');
+    const doUpload = async (): Promise<string> => {
+      if (typeof fileOrDataUrl === 'string') {
+        if (fileOrDataUrl.startsWith('data:')) {
+          const snapshot = await uploadString(storageRef, fileOrDataUrl, 'data_url');
+          return await getDownloadURL(snapshot.ref);
+        }
+        return fileOrDataUrl;
+      } else {
+        const snapshot = await uploadBytes(storageRef, fileOrDataUrl, {
+          contentType: fileOrDataUrl.type || 'image/jpeg'
+        });
         return await getDownloadURL(snapshot.ref);
       }
-      // If already a remote URL, return it directly
-      return fileOrDataUrl;
-    } else {
-      // Upload Blob or File
-      const snapshot = await uploadBytes(storageRef, fileOrDataUrl, {
-        contentType: fileOrDataUrl.type || 'image/jpeg'
-      });
-      return await getDownloadURL(snapshot.ref);
-    }
+    };
+
+    // Strict 2000ms timeout prevents hanging UI on 'Salvando...'
+    return await Promise.race([doUpload(), timeoutPromise<string>(2000)]);
   } catch (error) {
-    console.warn('[Storage] Firebase Storage upload failed, falling back to local/inline representation:', error);
-    if (typeof fileOrDataUrl === 'string') {
-      return fileOrDataUrl;
-    }
-    // Convert Blob/File to Data URL as resilient fallback
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = () => resolve('');
-      reader.readAsDataURL(fileOrDataUrl);
-    });
+    storageUnavailable = true;
+    console.warn('[Storage] Firebase Storage indisponível ou timeout, utilizando representação compacta:', error);
+    return getFallbackDataUrl(fileOrDataUrl);
   }
 }
 
@@ -71,6 +95,13 @@ export async function uploadChatMedia(
   const fileName = originalFileName || `${category}_${Date.now()}`;
   const fileSize = formatBytes(fileOrBlob.size);
 
+  if (storageUnavailable) {
+    onProgress?.(30);
+    const fallbackUrl = await getFallbackDataUrl(fileOrBlob);
+    onProgress?.(100);
+    return { mediaUrl: fallbackUrl, fileName, fileSize };
+  }
+
   try {
     const sanitizedName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
     const storagePath = `chats/${chatId}/${category}s/${Date.now()}_${sanitizedName}`;
@@ -86,7 +117,7 @@ export async function uploadChatMedia(
 
     onProgress?.(5);
 
-    const mediaUrl = await new Promise<string>((resolve, reject) => {
+    const uploadTaskPromise = new Promise<string>((resolve, reject) => {
       const uploadTask = uploadBytesResumable(storageRef, fileOrBlob, metadata);
 
       uploadTask.on(
@@ -112,26 +143,24 @@ export async function uploadChatMedia(
       );
     });
 
+    const mediaUrl = await Promise.race([
+      uploadTaskPromise,
+      timeoutPromise<string>(2500, 'Upload chat media timeout')
+    ]);
+
     return { mediaUrl, fileName, fileSize };
   } catch (error) {
-    console.warn(`[Storage] Resumable upload for ${category} had issue, falling back to FileReader:`, error);
+    storageUnavailable = true;
+    console.warn(`[Storage] Resumable upload for ${category} had issue, falling back to local representation:`, error);
     
     // Simulate progressive loading bar in fallback mode
-    onProgress?.(25);
-    await new Promise((r) => setTimeout(r, 120));
-    onProgress?.(60);
-    await new Promise((r) => setTimeout(r, 120));
-    onProgress?.(90);
+    onProgress?.(35);
+    await new Promise((r) => setTimeout(r, 60));
+    onProgress?.(70);
+    await new Promise((r) => setTimeout(r, 60));
 
-    const fallbackUrl = await new Promise<string>((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        onProgress?.(100);
-        resolve(reader.result as string);
-      };
-      reader.onerror = () => resolve('');
-      reader.readAsDataURL(fileOrBlob);
-    });
+    const fallbackUrl = await getFallbackDataUrl(fileOrBlob);
+    onProgress?.(100);
 
     return { mediaUrl: fallbackUrl, fileName, fileSize };
   }
@@ -149,6 +178,13 @@ export async function uploadStatusMedia(
   originalFileName?: string,
   onProgress?: (percent: number) => void
 ): Promise<string> {
+  if (storageUnavailable) {
+    onProgress?.(40);
+    const fallbackUrl = await getFallbackDataUrl(fileOrBlob);
+    onProgress?.(100);
+    return fallbackUrl;
+  }
+
   try {
     const timestamp = Date.now();
     const extension = mediaType === 'video' ? 'mp4' : 'jpg';
@@ -161,7 +197,7 @@ export async function uploadStatusMedia(
 
     onProgress?.(5);
 
-    return await new Promise<string>((resolve, reject) => {
+    const uploadTaskPromise = new Promise<string>((resolve, reject) => {
       const uploadTask = uploadBytesResumable(storageRef, fileOrBlob, metadata);
 
       uploadTask.on(
@@ -186,21 +222,21 @@ export async function uploadStatusMedia(
         }
       );
     });
-  } catch (error) {
-    console.warn('[Storage] Status media upload fallback:', error);
-    onProgress?.(30);
-    await new Promise((r) => setTimeout(r, 100));
-    onProgress?.(75);
-    await new Promise((r) => setTimeout(r, 100));
 
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        onProgress?.(100);
-        resolve(reader.result as string);
-      };
-      reader.onerror = () => resolve('');
-      reader.readAsDataURL(fileOrBlob);
-    });
+    return await Promise.race([
+      uploadTaskPromise,
+      timeoutPromise<string>(2500, 'Upload status media timeout')
+    ]);
+  } catch (error) {
+    storageUnavailable = true;
+    console.warn('[Storage] Status media upload fallback:', error);
+    onProgress?.(40);
+    await new Promise((r) => setTimeout(r, 60));
+    onProgress?.(80);
+    await new Promise((r) => setTimeout(r, 60));
+
+    const fallbackUrl = await getFallbackDataUrl(fileOrBlob);
+    onProgress?.(100);
+    return fallbackUrl;
   }
 }
