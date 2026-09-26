@@ -128,6 +128,7 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
   const [chats, setChats] = useState<Chat[]>(() => {
     if (typeof window !== 'undefined') {
       try {
+        const alreadyZeroed = localStorage.getItem('tribbu_ai_zeroed_v2');
         const saved = localStorage.getItem('zapchat_local_chats');
         if (saved) {
           const parsed = JSON.parse(saved);
@@ -136,14 +137,29 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
           );
           if (hasOldMock) {
             localStorage.removeItem('zapchat_local_chats');
+            localStorage.setItem('tribbu_ai_zeroed_v2', '1');
             return [TRIBBU_AI_CHAT];
           }
-          const restored = parsed.map((c: any) => ({
-            ...c,
-            messages: deduplicateMessages(c.messages || [])
-          }));
+          const restored = parsed.map((c: any) => {
+            if (c.id === TRIBBU_AI_CHAT_ID || c.isAI || c.name === 'Tribbu AI') {
+              return {
+                ...c,
+                isAI: true,
+                messages: alreadyZeroed ? deduplicateMessages(c.messages || []) : []
+              };
+            }
+            return {
+              ...c,
+              messages: deduplicateMessages(c.messages || [])
+            };
+          });
+          if (!alreadyZeroed) {
+            localStorage.setItem('tribbu_ai_zeroed_v2', '1');
+            localStorage.setItem('zapchat_local_chats', JSON.stringify(restored));
+          }
           return ensureTribbuAIPresent(restored);
         }
+        localStorage.setItem('tribbu_ai_zeroed_v2', '1');
       } catch (_) {}
     }
     return [TRIBBU_AI_CHAT];
@@ -412,19 +428,29 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
             }))
           }));
 
-          const finalMapped = ensureTribbuAIPresent(mappedChats);
+          const finalMapped = ensureTribbuAIPresent(
+            mappedChats.filter((c: any) => c.id !== TRIBBU_AI_CHAT_ID && !c.isAI)
+          );
           setChats(finalMapped);
           lastSyncTimeRef.current = Date.now();
           loaded = true;
-          if (finalMapped.length > 0) {
-            setActiveChatId(curr => curr || finalMapped[0].id);
-          }
           try {
             localStorage.setItem('zapchat_local_chats', JSON.stringify(finalMapped));
           } catch (_) {}
         }
       } catch {
         // Fallback for static hosting mode
+      }
+
+      // Clean up any legacy Tribbu AI messages in Firestore so Tribbu AI starts completely empty
+      try {
+        const aiMsgsSnap = await getDocs(collection(db, 'chats', TRIBBU_AI_CHAT_ID, 'messages'));
+        aiMsgsSnap.forEach((docSnap) => {
+          deleteDoc(doc(db, 'chats', TRIBBU_AI_CHAT_ID, 'messages', docSnap.id)).catch(() => {});
+        });
+        deleteDoc(doc(db, 'chats', TRIBBU_AI_CHAT_ID)).catch(() => {});
+      } catch {
+        // Silent catch
       }
 
       if (!loaded) {
@@ -434,7 +460,9 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
           if (!snap.empty) {
             const fsChats: Chat[] = [];
             snap.forEach(d => {
+              if (d.id === TRIBBU_AI_CHAT_ID) return;
               const chatData = d.data();
+              if (chatData.isAI) return;
               fsChats.push({ 
                 id: d.id, 
                 ...chatData,
@@ -443,13 +471,11 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
             });
             const finalFs = ensureTribbuAIPresent(fsChats);
             setChats(finalFs);
-            setActiveChatId(curr => curr || finalFs[0].id);
             try {
               localStorage.setItem('zapchat_local_chats', JSON.stringify(finalFs));
             } catch (_) {}
           } else {
             setChats([TRIBBU_AI_CHAT]);
-            setActiveChatId(TRIBBU_AI_CHAT_ID);
           }
         } catch {
           // Graceful silent fallback
@@ -604,7 +630,7 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
 
   // 3b. Real-time Firestore sync for active chat (enables instant messaging across devices and on Netlify static hosting)
   useEffect(() => {
-    if (!user || !activeChatId || !auth.currentUser) return;
+    if (!user || !activeChatId || activeChatId === TRIBBU_AI_CHAT_ID || !auth.currentUser) return;
 
     try {
       const messagesRef = collection(db, 'chats', activeChatId, 'messages');
@@ -774,36 +800,38 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
       return next;
     });
 
-    // B. Save to Firestore subcollection chats/{activeChatId}/messages using setDoc with EXACT messageId
-    try {
-      await setDoc(doc(db, 'chats', activeChatId, 'messages', messageId), {
-        id: messageId,
-        text: messageText,
-        senderPhoneNumber: senderPhone,
-        senderName,
-        senderId: user.uid || auth.currentUser?.uid || null,
-        senderEmail: user.email || null,
-        time: timeString,
-        timestamp: nowTimestamp,
-        status: 'sent',
-        type: messageType,
-        mediaType: messageType,
-        mediaUrl: media?.mediaUrl || null,
-        fileName: media?.fileName || null,
-        fileSize: media?.fileSize || null,
-        contactName: media?.contactName || null,
-        contactPhone: media?.contactPhone || null
-      });
+    // B. Save to Firestore subcollection chats/{activeChatId}/messages using setDoc with EXACT messageId (except private Tribbu AI session)
+    if (activeChatId !== TRIBBU_AI_CHAT_ID) {
+      try {
+        await setDoc(doc(db, 'chats', activeChatId, 'messages', messageId), {
+          id: messageId,
+          text: messageText,
+          senderPhoneNumber: senderPhone,
+          senderName,
+          senderId: user.uid || auth.currentUser?.uid || null,
+          senderEmail: user.email || null,
+          time: timeString,
+          timestamp: nowTimestamp,
+          status: 'sent',
+          type: messageType,
+          mediaType: messageType,
+          mediaUrl: media?.mediaUrl || null,
+          fileName: media?.fileName || null,
+          fileSize: media?.fileSize || null,
+          contactName: media?.contactName || null,
+          contactPhone: media?.contactPhone || null
+        });
 
-      // Update parent chat summary in Firestore
-      await setDoc(doc(db, 'chats', activeChatId), {
-        lastMessage: messageType === 'image' ? '📷 Foto' : messageType === 'video' ? '🎥 Vídeo' : messageType === 'audio' ? '🎤 Mensagem de voz' : messageText,
-        lastMessageTime: timeString,
-        lastMessageTimestamp: nowTimestamp,
-        updatedAt: nowTimestamp
-      }, { merge: true });
-    } catch {
-      // Fallback silencioso caso offline ou sem permissão
+        // Update parent chat summary in Firestore
+        await setDoc(doc(db, 'chats', activeChatId), {
+          lastMessage: messageType === 'image' ? '📷 Foto' : messageType === 'video' ? '🎥 Vídeo' : messageType === 'audio' ? '🎤 Mensagem de voz' : messageText,
+          lastMessageTime: timeString,
+          lastMessageTimestamp: nowTimestamp,
+          updatedAt: nowTimestamp
+        }, { merge: true });
+      } catch {
+        // Fallback silencioso caso offline ou sem permissão
+      }
     }
 
     // C. Send message to backend Express server with the SAME messageId
@@ -884,50 +912,6 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
             type: 'text',
             mediaType: 'text'
           };
-
-          // Save AI response to Firestore chats/messages
-          try {
-            await setDoc(doc(db, 'chats', activeChatId, 'messages', aiMsgId), {
-              id: aiMsgId,
-              text: replyText,
-              senderPhoneNumber: 'tribbu-ai',
-              senderName: 'Tribbu AI',
-              senderId: 'tribbu-ai',
-              time: aiTime,
-              timestamp: aiTimestamp,
-              status: 'read',
-              type: 'text',
-              mediaType: 'text'
-            });
-
-            // Update parent chat summary in Firestore
-            await setDoc(doc(db, 'chats', activeChatId), {
-              id: activeChatId,
-              name: 'Tribbu AI',
-              isAI: true,
-              lastMessage: replyText,
-              lastMessageTime: aiTime,
-              lastMessageTimestamp: aiTimestamp,
-              updatedAt: aiTimestamp
-            }, { merge: true });
-          } catch {
-            // Fallback silencioso
-          }
-
-          // Also save in local server if running
-          try {
-            await fetch(`/api/chats/${activeChatId}/messages`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                id: aiMsgId,
-                text: replyText,
-                senderPhoneNumber: 'tribbu-ai',
-                senderName: 'Tribbu AI',
-                type: 'text'
-              })
-            });
-          } catch (_) {}
 
           // Update local state with the AI reply
           setChats(prev => {

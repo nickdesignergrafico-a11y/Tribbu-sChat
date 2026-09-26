@@ -633,7 +633,7 @@ export default function Sidebar({
               : 'bg-white/5 text-white/70 hover:bg-white/10 hover:text-white border border-transparent'
           }`}
         >
-          Individuais {chats.filter(c => !c.isGroup && !c.isCommunity).length > 0 && `(${chats.filter(c => !c.isGroup && !c.isCommunity).length})`}
+          Individuais {chats.filter(c => !c.isGroup && !c.isCommunity && !c.isAI && c.id !== 'tribbu-ai').length > 0 && `(${chats.filter(c => !c.isGroup && !c.isCommunity && !c.isAI && c.id !== 'tribbu-ai').length})`}
         </button>
         <button
           type="button"
@@ -1061,10 +1061,24 @@ export default function Sidebar({
                     <MessageSquarePlus className="w-6 h-6" />
                   </div>
                   <p className="text-sm font-semibold text-white/90">
-                    {searchTerm ? 'Nenhuma conversa encontrada' : 'Nenhuma conversa aqui'}
+                    {searchTerm
+                      ? 'Nenhuma conversa encontrada'
+                      : activeFilter === 'direct'
+                        ? 'Nenhuma conversa individual'
+                        : activeFilter === 'groups'
+                          ? 'Nenhuma Tribbu encontrada'
+                          : activeFilter === 'unread'
+                            ? 'Nenhuma conversa não lida'
+                            : activeFilter === 'favorites'
+                              ? 'Nenhuma conversa favorita'
+                              : 'Nenhuma conversa aqui'}
                   </p>
                   <p className="text-xs text-white/40 mt-1 max-w-[240px]">
-                    Toque nos botões acima para iniciar uma conversa individual ou criar uma nova Tribbu.
+                    {activeFilter === 'direct'
+                      ? 'Toque em "Nova Conversa" acima para iniciar um chat individual.'
+                      : activeFilter === 'groups'
+                        ? 'Toque em "Nova Tribbu" acima para criar um grupo.'
+                        : 'Toque nos botões acima para iniciar uma conversa individual ou criar uma nova Tribbu.'}
                   </p>
                 </div>
               )}
