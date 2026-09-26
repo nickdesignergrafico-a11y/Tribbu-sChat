@@ -51,6 +51,7 @@ import { NewStatusModal } from './NewStatusModal';
 import { uploadChatMedia, formatBytes } from '../services/storageService';
 import { publishTextStatus } from '../services/statusService';
 import { setTypingStatus, clearTypingStatus, subscribeToChatTyping, TypingIndicator } from '../services/typingService';
+import { useBranding } from '../context/BrandingContext';
 
 interface UploadProgressInfo {
   active: boolean;
@@ -92,6 +93,7 @@ export default function ChatArea({
   onBackToSidebar,
   onRevokeInvite
 }: ChatAreaProps) {
+  const { logoUrl } = useBranding();
   const [inputText, setInputText] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
@@ -381,9 +383,20 @@ export default function ChatArea({
     return (
       <div className="hidden md:flex flex-1 flex-col items-center justify-center bg-slate-950/40 relative">
         <div className="max-w-md text-center p-8 flex flex-col items-center select-none text-white/90">
-          <div className="w-64 h-40 mb-6 bg-cover bg-no-repeat opacity-[0.15]" style={{
-            backgroundImage: `url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')`
-          }} />
+          <div className="w-32 h-32 mb-6 rounded-3xl overflow-hidden border border-cyan-400/40 p-2 bg-slate-950/80 flex items-center justify-center shadow-[0_0_35px_rgba(6,182,212,0.25)]">
+            <img
+              src={logoUrl || '/icon/logo_oficial.png'}
+              alt="Tribbu'sChat"
+              className="w-full h-full object-contain drop-shadow-[0_0_12px_rgba(6,182,212,0.4)]"
+              referrerPolicy="no-referrer"
+              onError={(e) => {
+                const target = e.target as HTMLImageElement;
+                if (!target.src.includes('/icon/logo_oficial.png')) {
+                  target.src = '/icon/logo_oficial.png';
+                }
+              }}
+            />
+          </div>
           <h3 className="text-xl font-semibold text-white mb-2">Tribbu'sChat Pro</h3>
           <p className="text-sm text-white/50 leading-relaxed max-w-xs">
             Envie e receba mensagens com sincronização em tempo real e crie grupos facilmente.
