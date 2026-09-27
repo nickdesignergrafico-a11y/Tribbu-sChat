@@ -14,11 +14,12 @@ import {
   Loader2,
   Info
 } from 'lucide-react';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { UserSession } from '../types';
 import { uploadProfilePhoto } from '../services/storageService';
 import { formatPhoneDisplay } from './LoginScreen';
+import { isMatchingE164Phone, formatarParaE164Estrito } from './ContactPickerButton';
 import CameraCaptureModal from './CameraCaptureModal';
 
 interface NewTribbuModalProps {
@@ -69,40 +70,60 @@ export default function NewTribbuModal({
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Load available users from Firestore to populate member selection
+  // Load available users from Firestore in real-time to populate member selection
   useEffect(() => {
     if (!isOpen) return;
 
-    const loadUsers = async () => {
-      setIsLoadingUsers(true);
-      setError('');
-      try {
-        const snap = await getDocs(collection(db, 'users'));
-        const users: MemberOption[] = [];
-        snap.forEach((docSnap) => {
-          const data = docSnap.data();
-          const phone = data.phoneNumber || '';
-          // Don't list current user in selectable members list since they are creator by default
-          if (phone && phone !== currentUser.phoneNumber && docSnap.id !== currentUser.uid) {
+    setIsLoadingUsers(true);
+    setError('');
+    let isMounted = true;
+
+    try {
+      const unsubscribe = onSnapshot(
+        collection(db, 'users'),
+        (snap) => {
+          if (!isMounted) return;
+          const users: MemberOption[] = [];
+          const seenPhones = new Set<string>();
+
+          snap.forEach((docSnap) => {
+            const data = docSnap.data();
+            const phone = data.phoneNumber || data.authPhoneNumber || '';
+            if (!phone) return;
+
+            const isMe =
+              (currentUser.uid && docSnap.id === currentUser.uid) ||
+              (currentUser.phoneNumber && isMatchingE164Phone(phone, currentUser.phoneNumber));
+            if (isMe) return;
+
+            const e164Phone = formatarParaE164Estrito(phone) || phone;
+            if (seenPhones.has(e164Phone)) return;
+            seenPhones.add(e164Phone);
+
             users.push({
               uid: docSnap.id,
-              displayName: data.displayName || phone,
-              phoneNumber: phone,
+              displayName: data.displayName || e164Phone,
+              phoneNumber: e164Phone,
               photoURL: data.photoURL,
               avatarColor: data.avatarColor || '#06B6D4',
               initial: data.initial || (data.displayName ? data.displayName.charAt(0).toUpperCase() : 'U')
             });
-          }
-        });
-        setAllUsers(users);
-      } catch {
-        // Silencioso caso offline
-      } finally {
-        setIsLoadingUsers(false);
-      }
-    };
+          });
+          setAllUsers(users);
+          setIsLoadingUsers(false);
+        },
+        () => {
+          if (isMounted) setIsLoadingUsers(false);
+        }
+      );
 
-    loadUsers();
+      return () => {
+        isMounted = false;
+        unsubscribe();
+      };
+    } catch {
+      setIsLoadingUsers(false);
+    }
   }, [isOpen, currentUser]);
 
   const handleToggleMember = (phone: string) => {

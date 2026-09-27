@@ -52,6 +52,7 @@ export interface ContactPickerButtonProps {
  * Formata e valida o número de telefone para o padrão internacional E.164 estrito:
  * - Preserva/garante exatamente um sinal '+' no início (sem duplicidade de '+').
  * - Remove espaços, parênteses, pontos, traços e quaisquer caracteres não numéricos do miolo.
+ * - Trata prefixo zero de operadora/DDD local brasileiro (ex: 063992624090 -> +5563992624090) quando sem '+'.
  * - Garante que a string final (contando o '+') tenha entre 8 e 16 caracteres; retorna null se inválido.
  */
 export function formatarParaE164Estrito(rawPhone: string): string | null {
@@ -59,13 +60,31 @@ export function formatarParaE164Estrito(rawPhone: string): string | null {
     return null;
   }
 
+  const hadExplicitPlus = rawPhone.trim().startsWith('+');
+
   // Remove espaços, parênteses, pontos, traços e sinais '+' do miolo, mantendo apenas dígitos
-  const digitsOnly = rawPhone
+  let digitsOnly = rawPhone
     .replace(/[\s().+-]/g, '')
     .replace(/\D/g, '');
 
   if (!digitsOnly) {
     return null;
+  }
+
+  // Se veio da agenda sem '+' e começa com '0' (ex: 063992624090 ou 01563992624090)
+  if (!hadExplicitPlus && digitsOnly.startsWith('0')) {
+    if (digitsOnly.length === 11 || digitsOnly.length === 12) {
+      // Ex: 0 + DDD (2) + número (8 ou 9)
+      digitsOnly = digitsOnly.slice(1);
+    } else if (digitsOnly.length === 13 || digitsOnly.length === 14) {
+      // Ex: 0 + Operadora (2) + DDD (2) + número (8 ou 9)
+      digitsOnly = digitsOnly.slice(3);
+    }
+  }
+
+  // Se o número tem 10 ou 11 dígitos (DDD + número brasileiro) e não começa com 55, adiciona o DDI 55
+  if (!hadExplicitPlus && (digitsOnly.length === 10 || digitsOnly.length === 11) && !digitsOnly.startsWith('55')) {
+    digitsOnly = `55${digitsOnly}`;
   }
 
   // Garante obrigatoriamente um único '+' no início antes dos dígitos
@@ -82,18 +101,67 @@ export function formatarParaE164Estrito(rawPhone: string): string | null {
 export const formatPhoneToE164 = formatarParaE164Estrito;
 
 /**
- * Compara dois números no formato E.164 (priorizando igualdade exata com '+' e suportando sufixo DDI/DDD)
+ * Gera variações canônicas de um telefone (com/sem DDI 55 e com/sem o 9º dígito brasileiro)
+ * para garantir que o cruzamento encontre o usuário mesmo que o Firebase Auth ou a agenda
+ * tenha salvo com ou sem o nono dígito ou DDI.
  */
-function isMatchingE164Phone(phoneA: string, phoneB: string): boolean {
-  const normA = formatarParaE164Estrito(phoneA);
-  const normB = formatarParaE164Estrito(phoneB);
-  if (!normA || !normB) return false;
-  if (normA === normB) return true;
+export function getPhoneMatchKeys(rawPhone?: string): string[] {
+  if (!rawPhone) return [];
+  let digits = rawPhone.replace(/\D/g, '');
+  if (!digits) return [];
 
-  const digitsA = normA.slice(1);
-  const digitsB = normB.slice(1);
+  if (digits.startsWith('0')) {
+    if (digits.length === 11 || digits.length === 12) digits = digits.slice(1);
+    else if (digits.length === 13 || digits.length === 14) digits = digits.slice(3);
+  }
+
+  const keys = new Set<string>();
+  keys.add(digits);
+
+  // Variação sem DDI 55
+  const national = digits.startsWith('55') && digits.length >= 12 ? digits.slice(2) : digits;
+  keys.add(national);
+  keys.add(`55${national}`);
+
+  // Tratamento do 9º dígito brasileiro: DDD (2 dígitos) + 9 + 8 dígitos (11 dígitos nacionais)
+  if (national.length === 11 && national.charAt(2) === '9') {
+    const withoutNinth = national.slice(0, 2) + national.slice(3); // 10 dígitos (DDD + 8 dígitos)
+    keys.add(withoutNinth);
+    keys.add(`55${withoutNinth}`);
+  } else if (national.length === 10) {
+    const withNinth = national.slice(0, 2) + '9' + national.slice(2); // 11 dígitos (DDD + 9 + 8 dígitos)
+    keys.add(withNinth);
+    keys.add(`55${withNinth}`);
+  }
+
+  // Últimos 8 dígitos (número base assinante) caso o contato na agenda tenha sido salvo sem DDD
+  if (national.length === 8 || (national.length === 9 && national.startsWith('9'))) {
+    const base8 = national.length === 9 ? national.slice(1) : national;
+    keys.add(base8);
+  }
+
+  return Array.from(keys);
+}
+
+/**
+ * Compara dois números no formato E.164 ou nacional (tratando DDI +55 e 9º dígito do Brasil)
+ */
+export function isMatchingE164Phone(phoneA?: string, phoneB?: string): boolean {
+  if (!phoneA || !phoneB) return false;
+  const keysA = getPhoneMatchKeys(phoneA);
+  const keysB = new Set(getPhoneMatchKeys(phoneB));
+  for (const k of keysA) {
+    if (keysB.has(k)) return true;
+  }
+  // Fallback se um dos números foi salvo na agenda apenas com 8/9 dígitos locais sem DDD
+  const digitsA = phoneA.replace(/\D/g, '');
+  const digitsB = phoneB.replace(/\D/g, '');
   if (digitsA.length >= 8 && digitsB.length >= 8) {
-    return digitsA.endsWith(digitsB) || digitsB.endsWith(digitsA);
+    const last8A = digitsA.slice(-8);
+    const last8B = digitsB.slice(-8);
+    if (last8A === last8B && (digitsA.length <= 9 || digitsB.length <= 9)) {
+      return true;
+    }
   }
   return false;
 }
@@ -155,14 +223,20 @@ export async function verifyUserInDatabaseByPhone(
       if (matchedUser) return;
       const data = docSnap.data() as {
         phoneNumber?: string;
+        authPhoneNumber?: string;
         displayName?: string;
         name?: string;
         photoURL?: string;
         avatarColor?: string;
         initial?: string;
       };
-      if (data.phoneNumber && isMatchingE164Phone(validPhone, data.phoneNumber)) {
-        const storedE164 = formatarParaE164Estrito(data.phoneNumber) || data.phoneNumber;
+      const candidatePhone = data.phoneNumber || data.authPhoneNumber || '';
+      if (
+        candidatePhone &&
+        (isMatchingE164Phone(validPhone, data.phoneNumber) ||
+          isMatchingE164Phone(validPhone, data.authPhoneNumber))
+      ) {
+        const storedE164 = formatarParaE164Estrito(candidatePhone) || candidatePhone;
         const resolvedName =
           data.displayName ||
           data.name ||

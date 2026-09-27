@@ -196,7 +196,7 @@ export default function Contatos({
           snapshot.forEach((docSnap) => {
             const data = docSnap.data();
             const uid = docSnap.id;
-            const phone = data.phoneNumber || '';
+            const phone = data.phoneNumber || data.authPhoneNumber || '';
             const digits = normalizePhoneDigits(phone);
 
             if (digits) {
@@ -213,10 +213,19 @@ export default function Contatos({
                 profileCompleted: !!data.profileCompleted
               };
 
-              // Mapeia tanto pelos dígitos completos quanto sem o código de país (55)
+              // Mapeia pelos dígitos completos, sem DDI 55 e com/sem 9º dígito brasileiro
               userMap.set(digits, profileInfo);
-              if (digits.startsWith('55') && digits.length > 2) {
-                userMap.set(digits.slice(2), profileInfo);
+              const national = digits.startsWith('55') && digits.length >= 12 ? digits.slice(2) : digits;
+              userMap.set(national, profileInfo);
+              userMap.set('55' + national, profileInfo);
+              if (national.length === 11 && national.charAt(2) === '9') {
+                const without9 = national.slice(0, 2) + national.slice(3);
+                userMap.set(without9, profileInfo);
+                userMap.set('55' + without9, profileInfo);
+              } else if (national.length === 10) {
+                const with9 = national.slice(0, 2) + '9' + national.slice(2);
+                userMap.set(with9, profileInfo);
+                userMap.set('55' + with9, profileInfo);
               }
             }
           });
@@ -241,39 +250,84 @@ export default function Contatos({
   // Helper para checagem rápida se um número de telefone está cadastrado no Firestore
   const checkIsTribbuUser = (phone) => {
     if (!phone) return null;
-    const digits = normalizePhoneDigits(phone);
+    let digits = normalizePhoneDigits(phone);
     if (!digits) return null;
+    if (digits.startsWith('0') && (digits.length === 11 || digits.length === 12)) {
+      digits = digits.slice(1);
+    }
 
-    // Busca exata
     if (registeredUsersMap.has(digits)) {
       return registeredUsersMap.get(digits);
     }
 
-    // Busca sem DDI 55
-    if (digits.startsWith('55') && registeredUsersMap.has(digits.slice(2))) {
-      return registeredUsersMap.get(digits.slice(2));
-    }
+    const national = digits.startsWith('55') && digits.length >= 12 ? digits.slice(2) : digits;
+    if (registeredUsersMap.has(national)) return registeredUsersMap.get(national);
+    if (registeredUsersMap.has('55' + national)) return registeredUsersMap.get('55' + national);
 
-    // Busca adicionando DDI 55
-    if (!digits.startsWith('55') && registeredUsersMap.has('55' + digits)) {
-      return registeredUsersMap.get('55' + digits);
+    if (national.length === 11 && national.charAt(2) === '9') {
+      const without9 = national.slice(0, 2) + national.slice(3);
+      if (registeredUsersMap.has(without9)) return registeredUsersMap.get(without9);
+      if (registeredUsersMap.has('55' + without9)) return registeredUsersMap.get('55' + without9);
+    } else if (national.length === 10) {
+      const with9 = national.slice(0, 2) + '9' + national.slice(2);
+      if (registeredUsersMap.has(with9)) return registeredUsersMap.get(with9);
+      if (registeredUsersMap.has('55' + with9)) return registeredUsersMap.get('55' + with9);
     }
 
     return null;
   };
 
-  // Processa a lista com os dados cruzados do Firestore
+  // Processa a lista mesclando contatos salvos localmente + todos os usuários que já instalaram o app no Firestore
   const enrichedContacts = useMemo(() => {
-    return contacts.map((c) => {
+    const myDigits = normalizePhoneDigits(currentUser?.phoneNumber || '');
+    const myNational = myDigits.startsWith('55') && myDigits.length >= 12 ? myDigits.slice(2) : myDigits;
+    const seenUids = new Set();
+    const seenNationalDigits = new Set();
+
+    const list = contacts.map((c) => {
       const tribbuUser = checkIsTribbuUser(c.phone);
+      if (tribbuUser?.uid) seenUids.add(tribbuUser.uid);
+      const cDigits = normalizePhoneDigits(c.phone);
+      const cNat = cDigits.startsWith('55') && cDigits.length >= 12 ? cDigits.slice(2) : cDigits;
+      if (cNat) seenNationalDigits.add(cNat);
+
       return {
         ...c,
+        name: tribbuUser?.displayName || c.name,
         isTribbuUser: !!tribbuUser,
         tribbuProfile: tribbuUser || null,
-        displayPhone: formatPhone(c.phone)
+        displayPhone: formatPhone(tribbuUser?.phoneNumber || c.phone)
       };
     });
-  }, [contacts, registeredUsersMap]);
+
+    // Adiciona automaticamente qualquer usuário cadastrado no Firestore que ainda não estava na lista local
+    registeredUsersMap.forEach((profile) => {
+      if (!profile || !profile.uid || seenUids.has(profile.uid)) return;
+      if (currentUser?.uid && profile.uid === currentUser.uid) return;
+
+      const pDigits = profile.digits || normalizePhoneDigits(profile.phoneNumber);
+      const pNat = pDigits.startsWith('55') && pDigits.length >= 12 ? pDigits.slice(2) : pDigits;
+      if (myNational && pNat && (pNat === myNational || pNat.slice(-8) === myNational.slice(-8))) {
+        return;
+      }
+      if (pNat && seenNationalDigits.has(pNat)) return;
+
+      seenUids.add(profile.uid);
+      if (pNat) seenNationalDigits.add(pNat);
+
+      list.push({
+        id: `tribbu_${profile.uid}`,
+        name: profile.displayName || profile.phoneNumber,
+        phone: profile.phoneNumber,
+        note: profile.about || 'Disponível na Tribbu',
+        isTribbuUser: true,
+        tribbuProfile: profile,
+        displayPhone: formatPhone(profile.phoneNumber)
+      });
+    });
+
+    return list;
+  }, [contacts, registeredUsersMap, currentUser]);
 
   // Contatos filtrados pela busca e aba selecionada
   const filteredContacts = useMemo(() => {

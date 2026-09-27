@@ -91,7 +91,9 @@ export default function Cadastro({ user, onComplete, onNavigate, onCancel }) {
 
     try {
       const activeUser = auth.currentUser;
-      const cleanPhone = activeUser?.phoneNumber || phone || user?.phoneNumber || '+5511999999999';
+      const preferredTypedPhone = phone || user?.phoneNumber || storedPhone || '';
+      const cleanPhone = preferredTypedPhone || activeUser?.phoneNumber || '+5511999999999';
+      const authPhone = activeUser?.phoneNumber || cleanPhone;
       const targetUid = activeUser?.uid || user?.uid || initialUid || `user_${cleanPhone.replace(/\D/g, '') || Date.now()}`;
 
       // 1. Upload foto de perfil para o Firebase Storage se o usuário escolheu uma imagem
@@ -127,10 +129,12 @@ export default function Cadastro({ user, onComplete, onNavigate, onCancel }) {
         }
       }
 
-      // 4. Grava dados do novo usuário no Firestore (vinculando ao phoneNumber autenticado)
+      // 4. Grava dados do novo usuário no Firestore (vinculando ao phoneNumber e authPhoneNumber)
       const userProfileData = {
         uid: targetUid,
         phoneNumber: cleanPhone,
+        authPhoneNumber: authPhone,
+        phoneDigits: cleanPhone.replace(/\D/g, ''),
         displayName: trimmedName,
         avatarColor: finalAvatarColor,
         initial: finalInitial,
@@ -139,14 +143,16 @@ export default function Cadastro({ user, onComplete, onNavigate, onCancel }) {
         lastSeen: nowTimestamp,
         isOnline: true,
         profileCompleted: true,
-        createdAt: nowIso
+        createdAt: nowIso,
+        updatedAt: nowIso
       };
 
       const userDocRef = doc(db, 'users', targetUid);
+      const writePromise = setDoc(userDocRef, userProfileData, { merge: true }).catch(() => {});
       try {
         await Promise.race([
-          setDoc(userDocRef, userProfileData, { merge: true }),
-          new Promise((r) => setTimeout(r, 1800))
+          writePromise,
+          new Promise((r) => setTimeout(r, 2500))
         ]);
       } catch {
         // Silencioso

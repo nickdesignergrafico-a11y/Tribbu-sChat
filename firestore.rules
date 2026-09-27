@@ -18,28 +18,27 @@ service cloud.firestore {
 
     // Users collection
     match /users/{userId} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && request.auth.uid == userId;
+      allow read, write: if true;
     }
 
     // Chats collection
     match /chats/{chatId} {
-      allow read, write: if isAuthenticated();
+      allow read, write: if true;
 
       // Messages subcollection
       match /messages/{messageId} {
-        allow read, write: if isAuthenticated();
+        allow read, write: if true;
       }
 
       // Real-time typing & recording indicators
       match /typing/{userId} {
-        allow read, write: if isAuthenticated();
+        allow read, write: if true;
       }
     }
 
     // Status updates (Stories: photos and videos)
     match /statuses/{statusId} {
-      allow read, write: if isAuthenticated();
+      allow read, write: if true;
     }
 
     // System Settings & Official Branding (Logo, Themes)

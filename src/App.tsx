@@ -20,6 +20,7 @@ import { INITIAL_CHATS, TRIBBU_AI_CHAT, TRIBBU_AI_CHAT_ID } from './initialData'
 import Sidebar from './components/Sidebar';
 import ChatArea from './components/ChatArea';
 import JoinGroupModal from './components/JoinGroupModal';
+import { isMatchingE164Phone, formatarParaE164Estrito } from './components/ContactPickerButton';
 import { uploadProfilePhoto } from './services/storageService';
 import { navigate } from './utils/navigation';
 
@@ -40,6 +41,7 @@ export function normalizePhone(p?: string): string {
 export function isSamePhoneNumber(a?: string, b?: string): boolean {
   if (!a || !b) return false;
   if (a === b) return true;
+  if (isMatchingE164Phone(a, b)) return true;
   const na = normalizePhone(a);
   const nb = normalizePhone(b);
   if (!na || !nb) return false;
@@ -388,7 +390,46 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
     };
   }, []);
 
-  // 2. Fetch all chats once user is logged in
+  // 1b. Ensure logged-in user profile is always published to Firestore /users so other devices can find them
+  useEffect(() => {
+    if (!user || !isUserProfileComplete(user)) return;
+
+    const syncMyProfileToFirestore = async () => {
+      try {
+        const rawPhone = user.phoneNumber || auth.currentUser?.phoneNumber || '';
+        const formattedE164 = formatarParaE164Estrito(rawPhone) || rawPhone;
+        const digits = normalizePhone(formattedE164);
+        if (!digits) return;
+
+        const targetUid = user.uid || auth.currentUser?.uid || `user_${digits}`;
+        await setDoc(
+          doc(db, 'users', targetUid),
+          {
+            uid: targetUid,
+            phoneNumber: formattedE164,
+            authPhoneNumber: auth.currentUser?.phoneNumber || formattedE164,
+            phoneDigits: digits,
+            displayName: user.displayName || formattedE164,
+            initial: user.initial || (user.displayName ? user.displayName.charAt(0).toUpperCase() : 'U'),
+            avatarColor: user.avatarColor || '#06B6D4',
+            photoURL: user.photoURL || null,
+            about: user.about || 'Disponível na Tribbu',
+            isOnline: true,
+            profileCompleted: true,
+            lastSeen: Date.now(),
+            updatedAt: new Date().toISOString()
+          },
+          { merge: true }
+        );
+      } catch {
+        // Silencioso caso offline
+      }
+    };
+
+    syncMyProfileToFirestore();
+  }, [user?.uid, user?.phoneNumber, user?.displayName, user?.photoURL]);
+
+  // 2. Fetch all chats once user is logged in and subscribe to Firestore chats in real-time
   useEffect(() => {
     if (!user) return;
 
@@ -484,6 +525,72 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
     };
 
     fetchChats();
+
+    // Real-time listener on Firestore /chats so new conversations created on another device appear automatically
+    let unsubscribeChats: (() => void) | null = null;
+    try {
+      unsubscribeChats = onSnapshot(
+        collection(db, 'chats'),
+        (snap) => {
+          if (snap.empty) return;
+          setChats((prevChats) => {
+            const nextChats = [...prevChats];
+            let changed = false;
+
+            snap.forEach((docSnap) => {
+              if (docSnap.id === TRIBBU_AI_CHAT_ID) return;
+              const data = docSnap.data();
+              if (data.isAI) return;
+
+              // Check if user is a member of this chat (or if it's a group / direct chat involving user)
+              const members: string[] = Array.isArray(data.members) ? data.members : [];
+              const involvesMe =
+                members.length === 0 ||
+                members.some((m) => isSamePhoneNumber(m, user.phoneNumber)) ||
+                isSamePhoneNumber(data.createdBy, user.phoneNumber);
+
+              if (!involvesMe && !data.isGroup) return;
+
+              const existingIdx = nextChats.findIndex((c) => c.id === docSnap.id);
+              if (existingIdx === -1) {
+                changed = true;
+                nextChats.push({
+                  id: docSnap.id,
+                  name: data.name || 'Conversa',
+                  avatarColor: data.avatarColor || '#06B6D4',
+                  avatarLetter: data.avatarLetter || 'TC',
+                  photoURL: data.photoURL || undefined,
+                  isGroup: !!data.isGroup,
+                  statusText: data.statusText || 'online',
+                  online: data.online !== false,
+                  unreadCount: data.unreadCount || 0,
+                  inviteCode: data.inviteCode || undefined,
+                  createdBy: data.createdBy,
+                  members,
+                  description: data.description || undefined,
+                  createdAt: data.createdAt,
+                  messages: Array.isArray(data.messages) ? data.messages : []
+                });
+              }
+            });
+
+            if (!changed) return prevChats;
+            const ensured = ensureTribbuAIPresent(nextChats);
+            try {
+              localStorage.setItem('zapchat_local_chats', JSON.stringify(ensured));
+            } catch (_) {}
+            return ensured;
+          });
+        },
+        () => {}
+      );
+    } catch {
+      // Silent catch
+    }
+
+    return () => {
+      if (unsubscribeChats) unsubscribeChats();
+    };
   }, [user]);
 
   // 3. Optional Express backend polling (active in fullstack mode, automatically backs off in static/Netlify mode)

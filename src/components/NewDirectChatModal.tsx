@@ -12,10 +12,11 @@ import {
   Loader2,
   ArrowRight
 } from 'lucide-react';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, getDocs, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { UserSession } from '../types';
 import { formatPhoneDisplay, normalizePhoneNumber } from './LoginScreen';
+import { isMatchingE164Phone, formatarParaE164Estrito } from './ContactPickerButton';
 import { TribbuBalloonIcon } from './Contatos.jsx';
 
 interface NewDirectChatModalProps {
@@ -63,41 +64,62 @@ export default function NewDirectChatModal({
   const [recentUsers, setRecentUsers] = useState<FoundUser[]>([]);
   const [isLoadingRecent, setIsLoadingRecent] = useState(false);
 
-  // Fetch registered users from Firestore on mount so user can either search by chip or pick a contact
+  // Fetch registered users from Firestore in real-time so user can either search by chip or pick a contact
   useEffect(() => {
     if (!isOpen) return;
 
-    const loadRegisteredUsers = async () => {
-      setIsLoadingRecent(true);
-      try {
-        const usersSnap = await getDocs(collection(db, 'users'));
-        const list: FoundUser[] = [];
-        usersSnap.forEach(docSnap => {
-          const data = docSnap.data();
-          const cleanPhone = data.phoneNumber || '';
-          // Don't show current user themselves in the contact list
-          if (cleanPhone && cleanPhone !== currentUser.phoneNumber && docSnap.id !== currentUser.uid) {
+    setIsLoadingRecent(true);
+    let isMounted = true;
+
+    try {
+      const unsubscribe = onSnapshot(
+        collection(db, 'users'),
+        (usersSnap) => {
+          if (!isMounted) return;
+          const list: FoundUser[] = [];
+          const seenPhones = new Set<string>();
+
+          usersSnap.forEach((docSnap) => {
+            const data = docSnap.data();
+            const cleanPhone = data.phoneNumber || data.authPhoneNumber || '';
+            if (!cleanPhone) return;
+
+            // Don't show current user themselves in the contact list
+            const isMe =
+              (currentUser.uid && docSnap.id === currentUser.uid) ||
+              (currentUser.phoneNumber && isMatchingE164Phone(cleanPhone, currentUser.phoneNumber));
+            if (isMe) return;
+
+            const e164Key = formatarParaE164Estrito(cleanPhone) || cleanPhone;
+            if (seenPhones.has(e164Key)) return;
+            seenPhones.add(e164Key);
+
             list.push({
               uid: docSnap.id,
               displayName: data.displayName || cleanPhone,
-              phoneNumber: cleanPhone,
+              phoneNumber: e164Key,
               photoURL: data.photoURL,
               avatarColor: data.avatarColor || '#06B6D4',
               initial: data.initial || (data.displayName ? data.displayName.charAt(0).toUpperCase() : 'U'),
               about: data.about || 'Disponível na Tribbu',
               isOnline: data.isOnline
             });
-          }
-        });
-        setRecentUsers(list);
-      } catch {
-        // Silencioso caso offline
-      } finally {
-        setIsLoadingRecent(false);
-      }
-    };
+          });
+          setRecentUsers(list);
+          setIsLoadingRecent(false);
+        },
+        () => {
+          if (isMounted) setIsLoadingRecent(false);
+        }
+      );
 
-    loadRegisteredUsers();
+      return () => {
+        isMounted = false;
+        unsubscribe();
+      };
+    } catch {
+      setIsLoadingRecent(false);
+    }
   }, [isOpen, currentUser]);
 
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -121,65 +143,30 @@ export default function NewDirectChatModal({
     setErrorMessage('');
     setFoundUser(null);
 
-    const normalized = normalizePhoneNumber(phoneInput);
+    const normalized = formatarParaE164Estrito(phoneInput) || normalizePhoneNumber(phoneInput);
 
     try {
-      // 1. Direct query on Firestore /users with phoneNumber
-      const q = query(collection(db, 'users'), where('phoneNumber', '==', normalized));
-      const querySnap = await getDocs(q);
-
-      if (!querySnap.empty) {
-        const docSnap = querySnap.docs[0];
-        const data = docSnap.data();
-        setFoundUser({
-          uid: docSnap.id,
-          displayName: data.displayName || normalized,
-          phoneNumber: data.phoneNumber || normalized,
-          photoURL: data.photoURL,
-          avatarColor: data.avatarColor || '#06B6D4',
-          initial: data.initial || (data.displayName ? data.displayName.charAt(0).toUpperCase() : 'U'),
-          about: data.about || 'Disponível na Tribbu',
-          isOnline: data.isOnline
-        });
-        return;
-      }
-
-      // 2. Try match without '+' or with variations
-      const rawMatch = query(collection(db, 'users'), where('phoneNumber', '==', rawDigits));
-      const rawSnap = await getDocs(rawMatch);
-
-      if (!rawSnap.empty) {
-        const docSnap = rawSnap.docs[0];
-        const data = docSnap.data();
-        setFoundUser({
-          uid: docSnap.id,
-          displayName: data.displayName || normalized,
-          phoneNumber: data.phoneNumber || normalized,
-          photoURL: data.photoURL,
-          avatarColor: data.avatarColor || '#06B6D4',
-          initial: data.initial || (data.displayName ? data.displayName.charAt(0).toUpperCase() : 'U'),
-          about: data.about || 'Disponível na Tribbu',
-          isOnline: data.isOnline
-        });
-        return;
-      }
-
-      // 3. Fallback: check all docs for partial phone digits match
       const allUsersSnap = await getDocs(collection(db, 'users'));
       let matchedDoc: any = null;
-      allUsersSnap.forEach(d => {
-        const phone = d.data().phoneNumber || '';
-        const phoneDigits = phone.replace(/\D/g, '');
-        if (phoneDigits && (phoneDigits.includes(rawDigits) || rawDigits.includes(phoneDigits))) {
-          matchedDoc = { id: d.id, ...d.data() };
+      allUsersSnap.forEach((d) => {
+        if (matchedDoc) return;
+        const data = d.data();
+        const phone = data.phoneNumber || '';
+        const authPhone = data.authPhoneNumber || '';
+        if (
+          (phone && isMatchingE164Phone(normalized, phone)) ||
+          (authPhone && isMatchingE164Phone(normalized, authPhone))
+        ) {
+          matchedDoc = { id: d.id, ...data };
         }
       });
 
       if (matchedDoc) {
+        const resolvedPhone = formatarParaE164Estrito(matchedDoc.phoneNumber || matchedDoc.authPhoneNumber || normalized) || normalized;
         setFoundUser({
           uid: matchedDoc.id,
-          displayName: matchedDoc.displayName || normalized,
-          phoneNumber: matchedDoc.phoneNumber || normalized,
+          displayName: matchedDoc.displayName || resolvedPhone,
+          phoneNumber: resolvedPhone,
           photoURL: matchedDoc.photoURL,
           avatarColor: matchedDoc.avatarColor || '#06B6D4',
           initial: matchedDoc.initial || (matchedDoc.displayName ? matchedDoc.displayName.charAt(0).toUpperCase() : 'U'),
