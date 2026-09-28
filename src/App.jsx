@@ -35,28 +35,9 @@ export default function App() {
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [hasCompletedProfile, setHasCompletedProfile] = useState(false);
 
-  const [pendingCadastroUser, setPendingCadastroUser] = useState(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = sessionStorage.getItem('tribbu_pending_user');
-        if (saved) return JSON.parse(saved);
-      } catch (_) {}
-    }
-    return null;
-  });
-
-  const [userSession, setUserSession] = useState(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const cached = localStorage.getItem('zapchat_user');
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          if (isUserProfileComplete(parsed)) return parsed;
-        }
-      } catch (_) {}
-    }
-    return null;
-  });
+  // Não injeta cegamente o cache antes do Firebase Auth resolver (evita perfil duplicado/antigo no PWA)
+  const [pendingCadastroUser, setPendingCadastroUser] = useState(null);
+  const [userSession, setUserSession] = useState(null);
 
   // Listener contínuo de sincronização de rotas com o navegador (popstate e app-route-change)
   useEffect(() => {
@@ -80,6 +61,29 @@ export default function App() {
     let unsubscribeFirestore = null;
 
     const unsubscribeAuth = onAuthStateChanged(auth, (fbUser) => {
+      // --- CORREÇÃO PONTO X: PREVENÇÃO DE SESSÃO CORROMPIDA DE OUTROS USUÁRIOS NO LOG IN ---
+      if (!fbUser) {
+        // Se deslogou ou não encontrou sessão ativa no Firebase Auth, limpa agressivamente o lixo local
+        setCurrentUser(null);
+        setHasCompletedProfile(false);
+        setUserSession(null);
+        setPendingCadastroUser(null);
+        try {
+          localStorage.removeItem('zapchat_user');
+          localStorage.removeItem('zapchat_token');
+          sessionStorage.removeItem('tribbu_pending_user');
+          localStorage.removeItem('tribbu_pending_phone');
+        } catch (_) {}
+        
+        setIsAuthReady(true);
+        const curPath = typeof window !== 'undefined' ? getNormalizedPath(window.location.pathname) : '';
+        if (curPath === '/chat' || curPath === '/') {
+          navigate('/login');
+        }
+        return;
+      }
+
+      // Se encontrou um usuário logado no Firebase, valida as credenciais
       setCurrentUser(fbUser);
       setIsAuthReady(true);
 
@@ -88,76 +92,76 @@ export default function App() {
         unsubscribeFirestore = null;
       }
 
-      if (fbUser) {
-        const derivedPhone = fbUser.phoneNumber || (fbUser.email?.includes('@zapchat.phone') ? ('+' + fbUser.email.replace('@zapchat.phone', '')) : '') || '';
-        const pending = {
-          uid: fbUser.uid,
-          phoneNumber: derivedPhone,
-          email: fbUser.email || undefined,
-          photoURL: fbUser.photoURL || undefined
-        };
-        setPendingCadastroUser((prev) => prev || pending);
+      const derivedPhone = fbUser.phoneNumber || (fbUser.email?.includes('@zapchat.phone') ? ('+' + fbUser.email.replace('@zapchat.phone', '')) : '') || '';
+      const pending = {
+        uid: fbUser.uid,
+        phoneNumber: derivedPhone,
+        email: fbUser.email || undefined,
+        photoURL: fbUser.photoURL || undefined
+      };
+      setPendingCadastroUser((prev) => prev || pending);
 
-        try {
-          const userDocRef = doc(db, 'users', fbUser.uid);
-          
-          // Ouve em tempo real se o documento do usuário já existe e está completo na coleção /users
-          unsubscribeFirestore = onSnapshot(userDocRef, (docSnap) => {
-            const data = docSnap.exists() ? docSnap.data() : null;
-            const complete = isUserProfileComplete(data);
-            
-            setHasCompletedProfile(complete);
-
-            if (complete) {
-              // Usuário já possui perfil completo salvo no Firestore
-              const session = {
-                uid: fbUser.uid,
-                phoneNumber: data?.phoneNumber || derivedPhone,
-                displayName: data?.displayName || '',
-                initial: data?.initial || data?.displayName?.charAt(0).toUpperCase() || 'U',
-                avatarColor: data?.avatarColor || '#06B6D4',
-                photoURL: data?.photoURL || fbUser.photoURL || undefined,
-                about: data?.about || 'Disponível na Tribbu',
-                profileCompleted: true
-              };
-              setUserSession(session);
-              try {
-                localStorage.setItem('zapchat_user', JSON.stringify(session));
-              } catch (_) {}
-
-              // Se o perfil já está completo e ainda está em /cadastro ou /login, redireciona para /chat
-              const curPath = typeof window !== 'undefined' ? getNormalizedPath(window.location.pathname) : '';
-              if (curPath === '/login' || curPath === '/cadastro') {
-                navigate('/chat');
-              }
-            } else {
-              // USUÁRIO AUTENTICADO VIA SMS, MAS QUE AINDA NÃO POSSUI DADOS SALVOS NA COLEÇÃO /users:
-              // Permite explicitamente acesso livre à rota /cadastro!
-              // Evita estritamente que seja jogado para /login ou direto para /chat antes de preencher Nome e Foto
-              setUserSession(null);
-              const curPath = typeof window !== 'undefined' ? getNormalizedPath(window.location.pathname) : '';
-              if (curPath !== '/cadastro') {
-                navigate('/cadastro');
-              }
-            }
-          }, () => {
-            // Silencioso caso offline
-          });
-        } catch {
-          // Silencioso
-        }
-      } else {
-        // Usuário deslogado
-        setCurrentUser(null);
-        setHasCompletedProfile(false);
-        setUserSession(null);
-        setPendingCadastroUser(null);
+      try {
+        const userDocRef = doc(db, 'users', fbUser.uid);
         
-        // Se estava no /chat, redireciona para /login
-        const curPath = typeof window !== 'undefined' ? getNormalizedPath(window.location.pathname) : '';
-        if (curPath === '/chat') {
-          navigate('/login');
-        }
+        // Ouve em tempo real se o documento do usuário já existe e está completo na coleção /users
+        unsubscribeFirestore = onSnapshot(userDocRef, (docSnap) => {
+          const data = docSnap.exists() ? docSnap.data() : null;
+          const complete = isUserProfileComplete(data);
+          
+          setHasCompletedProfile(complete);
+
+          if (complete) {
+            // Usuário já possui perfil completo salvo no Firestore
+            const session = {
+              uid: fbUser.uid,
+              phoneNumber: data?.phoneNumber || derivedPhone,
+              displayName: data?.displayName || '',
+              initial: data?.initial || data?.displayName?.charAt(0).toUpperCase() || 'U',
+              avatarColor: data?.avatarColor || '#06B6D4',
+              photoURL: data?.photoURL || fbUser.photoURL || undefined,
+              about: data?.about || 'Disponível na Tribbu',
+              profileCompleted: true
+            };
+            
+            // Verifica se o localStorage pertencia a outro UID e limpa antes de gravar o correto
+            try {
+              const localRaw = localStorage.getItem('zapchat_user');
+              if (localRaw) {
+                const localParsed = JSON.parse(localRaw);
+                if (localParsed && localParsed.uid !== fbUser.uid) {
+                  localStorage.removeItem('zapchat_user');
+                }
+              }
+            } catch (_) {}
+
+            setUserSession(session);
+            try {
+              localStorage.setItem('zapchat_user', JSON.stringify(session));
+            } catch (_) {}
+
+            // Se o perfil já está completo e ainda está preso nas telas de entrada, joga para o /chat
+            const curPath = typeof window !== 'undefined' ? getNormalizedPath(window.location.pathname) : '';
+            if (curPath === '/login' || curPath === '/cadastro' || curPath === '/') {
+              navigate('/chat');
+            }
+          } else {
+            // USUÁRIO AUTENTICADO VIA SMS, MAS QUE AINDA NÃO POSSUI DADOS SALVOS NA COLEÇÃO /users:
+            setUserSession(null);
+            try {
+              localStorage.removeItem('zapchat_user');
+            } catch (_) {}
+            
+            const curPath = typeof window !== 'undefined' ? getNormalizedPath(window.location.pathname) : '';
+            if (curPath !== '/cadastro') {
+              navigate('/cadastro');
+            }
+          }
+        }, () => {
+          // Silencioso caso offline
+        });
+      } catch {
+        // Silencioso
       }
     });
 

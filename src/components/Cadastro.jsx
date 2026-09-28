@@ -7,6 +7,7 @@ import { auth, db } from '../firebase';
 import CameraCaptureModal from './CameraCaptureModal';
 import { resizeAndCompressImage } from '../utils/imageUtils';
 import { uploadProfilePhoto } from '../services/storageService';
+import { formatarParaE164Estrito } from './ContactPickerButton';
 import { useBranding } from '../context/BrandingContext';
 import { isUserProfileComplete } from '../types';
 
@@ -129,12 +130,16 @@ export default function Cadastro({ user, onComplete, onNavigate, onCancel }) {
         }
       }
 
+      // --- CORREÇÃO PONTO X: HIGIENIZAÇÃO COMPLETA DOS DÍGITOS PARA SINCRONIZAÇÃO NO NETLIFY ---
+      const e164Validado = formatarParaE164Estrito(cleanPhone);
+      const digitosLimpos = e164Validado ? e164Validado.replace(/\D/g, '') : cleanPhone.replace(/\D/g, '');
+
       // 4. Grava dados do novo usuário no Firestore (vinculando ao phoneNumber e authPhoneNumber)
       const userProfileData = {
         uid: targetUid,
-        phoneNumber: cleanPhone,
+        phoneNumber: e164Validado || cleanPhone,
         authPhoneNumber: authPhone,
-        phoneDigits: cleanPhone.replace(/\D/g, ''),
+        phoneDigits: digitosLimpos, // Fixado para garantir o cruzamento exato no Contatos.jsx
         displayName: trimmedName,
         avatarColor: finalAvatarColor,
         initial: finalInitial,
@@ -167,7 +172,7 @@ export default function Cadastro({ user, onComplete, onNavigate, onCancel }) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            phoneNumber: cleanPhone,
+            phoneNumber: e164Validado || cleanPhone,
             displayName: trimmedName
           }),
           signal: controller.signal
@@ -183,7 +188,7 @@ export default function Cadastro({ user, onComplete, onNavigate, onCancel }) {
 
       const session = {
         uid: targetUid,
-        phoneNumber: cleanPhone,
+        phoneNumber: e164Validado || cleanPhone,
         displayName: trimmedName,
         initial: finalInitial,
         avatarColor: finalAvatarColor,

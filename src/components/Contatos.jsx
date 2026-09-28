@@ -87,10 +87,26 @@ export function TribbuUserBadge({ showLabel = true, className = "" }) {
   );
 }
 
-// Normaliza números de telefone para cruzar dados com precisão
+// Normaliza e higieniza números de telefone (remove zeros de operadora à esquerda e garante DDI 55 em números de 10/11 dígitos)
 export function normalizePhoneDigits(phone) {
   if (!phone) return '';
-  return String(phone).replace(/\D/g, '');
+  let digits = String(phone).replace(/\D/g, '');
+  if (!digits) return '';
+
+  // Remove prefixos de operadora com zero à esquerda (ex: 01563999998888, 02111999998888 -> remove 0XX)
+  if (digits.startsWith('0') && (digits.length === 13 || digits.length === 14)) {
+    digits = digits.slice(3);
+  }
+
+  // Remove quaisquer zeros à esquerda remanescentes (ex: 063999998888 -> 63999998888)
+  digits = digits.replace(/^0+/, '');
+
+  // Força o DDI 55 caso falte e possua 10 ou 11 dígitos (padrão brasileiro DDD + número)
+  if ((digits.length === 10 || digits.length === 11) && !digits.startsWith('55')) {
+    digits = '55' + digits;
+  }
+
+  return digits;
 }
 
 // Formata o telefone para exibição elegante no padrão brasileiro ou internacional
@@ -196,14 +212,15 @@ export default function Contatos({
           snapshot.forEach((docSnap) => {
             const data = docSnap.data();
             const uid = docSnap.id;
-            const phone = data.phoneNumber || data.authPhoneNumber || '';
-            const digits = normalizePhoneDigits(phone);
+            const rawPhone = data.phoneDigits || data.phoneNumber || data.authPhoneNumber || '';
+            const digits = normalizePhoneDigits(rawPhone);
 
             if (digits) {
+              const displayPhoneE164 = `+${digits}`;
               const profileInfo = {
                 uid,
                 displayName: data.displayName || 'Usuário Tribbu',
-                phoneNumber: phone,
+                phoneNumber: data.phoneNumber?.startsWith('+') ? data.phoneNumber : displayPhoneE164,
                 digits,
                 photoURL: data.photoURL || null,
                 avatarColor: data.avatarColor || '#06B6D4',
@@ -213,11 +230,13 @@ export default function Contatos({
                 profileCompleted: !!data.profileCompleted
               };
 
-              // Mapeia pelos dígitos completos, sem DDI 55 e com/sem 9º dígito brasileiro
+              // 1. Mapeia pelos dígitos completos higienizados (com DDI 55) e nacionais (sem DDI 55)
               userMap.set(digits, profileInfo);
               const national = digits.startsWith('55') && digits.length >= 12 ? digits.slice(2) : digits;
               userMap.set(national, profileInfo);
               userMap.set('55' + national, profileInfo);
+
+              // 2. Variações com e sem o 9º dígito brasileiro
               if (national.length === 11 && national.charAt(2) === '9') {
                 const without9 = national.slice(0, 2) + national.slice(3);
                 userMap.set(without9, profileInfo);
@@ -226,6 +245,12 @@ export default function Contatos({
                 const with9 = national.slice(0, 2) + '9' + national.slice(2);
                 userMap.set(with9, profileInfo);
                 userMap.set('55' + with9, profileInfo);
+              }
+
+              // 3. Índice de fallback pelos últimos 8 dígitos (número base do assinante)
+              if (digits.length >= 8) {
+                const last8 = digits.slice(-8);
+                userMap.set(`base8_${last8}`, profileInfo);
               }
             }
           });
@@ -247,15 +272,32 @@ export default function Contatos({
     }
   }, [isOpen]);
 
-  // Helper para checagem rápida se um número de telefone está cadastrado no Firestore
+  // --- CORREÇÃO PONTO X: TRATAMENTO AGRESSIVO DE ZEROS E PREFIXOS DA AGENDA LOCAL BRASILEIRA ---
   const checkIsTribbuUser = (phone) => {
     if (!phone) return null;
-    let digits = normalizePhoneDigits(phone);
+    let digits = String(phone).replace(/\D/g, '');
     if (!digits) return null;
-    if (digits.startsWith('0') && (digits.length === 11 || digits.length === 12)) {
-      digits = digits.slice(1);
+
+    // Remove zeros iniciais de operadoras ou DDD (ex: 063... ou 01563... vira 63...)
+    if (digits.startsWith('0')) {
+      digits = digits.replace(/^0+/, '');
+      // Se era operadora longa (ex: 156399262...), remove os códigos de longa distância iniciais remanescentes
+      if (digits.length > 11 && !digits.startsWith('55')) {
+        // Assume os últimos 11 ou 10 dígitos nacionais
+        digits = digits.slice(-11);
+      }
+      // Se ficou com tamanho nacional brasileiro, força o DDI 55
+      if (digits.length === 10 || digits.length === 11) {
+        digits = '55' + digits;
+      }
     }
 
+    // Se o número veio na agenda sem o 55 (ex: 63992624090), injeta o 55 para cruzar perfeitamente com o Firestore
+    if ((digits.length === 10 || digits.length === 11) && !digits.startsWith('55')) {
+      digits = '55' + digits;
+    }
+
+    // 1. Busca direta por chave normalizada no mapa do Firestore
     if (registeredUsersMap.has(digits)) {
       return registeredUsersMap.get(digits);
     }
@@ -264,17 +306,21 @@ export default function Contatos({
     if (registeredUsersMap.has(national)) return registeredUsersMap.get(national);
     if (registeredUsersMap.has('55' + national)) return registeredUsersMap.get('55' + national);
 
-    if (national.length === 11 && national.charAt(2) === '9') {
-      const without9 = national.slice(0, 2) + national.slice(3);
-      if (registeredUsersMap.has(without9)) return registeredUsersMap.get(without9);
-      if (registeredUsersMap.has('55' + without9)) return registeredUsersMap.get('55' + without9);
-    } else if (national.length === 10) {
-      const with9 = national.slice(0, 2) + '9' + national.slice(2);
-      if (registeredUsersMap.has(with9)) return registeredUsersMap.get(with9);
-      if (registeredUsersMap.has('55' + with9)) return registeredUsersMap.get('55' + with9);
+    // 2. FALLBACK COMPLETO: Cruzamento via assinatura base (últimos 8 dígitos) para mitigar falhas de nono dígito ou DDI ausente
+    let matchedProfileFallback = null;
+    const searchTarget8 = digits.slice(-8);
+    
+    if (searchTarget8.length === 8) {
+      registeredUsersMap.forEach((profile) => {
+        if (matchedProfileFallback) return;
+        const dbDigits = profile.digits || '';
+        if (dbDigits.slice(-8) === searchTarget8) {
+          matchedProfileFallback = profile;
+        }
+      });
     }
 
-    return null;
+    return matchedProfileFallback;
   };
 
   // Processa a lista mesclando contatos salvos localmente + todos os usuários que já instalaram o app no Firestore

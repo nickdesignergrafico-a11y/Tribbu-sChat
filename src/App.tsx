@@ -107,25 +107,30 @@ interface MainChatAppProps {
 }
 
 export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
+  const [isAuthReady, setIsAuthReady] = useState<boolean>(false);
   const [user, setUser] = useState<UserSession | null>(() => {
-    if (userSession && isUserProfileComplete(userSession)) return userSession;
-    if (typeof window !== 'undefined') {
-      try {
-        const cached = localStorage.getItem('zapchat_user');
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          if (parsed && isUserProfileComplete(parsed)) return parsed;
-        }
-      } catch (_) {}
+    if (
+      userSession &&
+      auth.currentUser &&
+      userSession.uid === auth.currentUser.uid &&
+      isUserProfileComplete(userSession)
+    ) {
+      return userSession;
     }
     return null;
   });
 
   useEffect(() => {
-    if (userSession && isUserProfileComplete(userSession)) {
+    if (!isAuthReady) return;
+    if (
+      userSession &&
+      auth.currentUser &&
+      userSession.uid === auth.currentUser.uid &&
+      isUserProfileComplete(userSession)
+    ) {
       setUser(userSession);
     }
-  }, [userSession]);
+  }, [userSession, isAuthReady]);
 
   const [chats, setChats] = useState<Chat[]>(() => {
     if (typeof window !== 'undefined') {
@@ -326,15 +331,22 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
           const cached = localStorage.getItem('zapchat_user');
           if (cached) {
             const parsed = JSON.parse(cached);
-            if (parsed && (parsed.uid === fbUser.uid || parsed.email === fbUser.email) && isUserProfileComplete(parsed)) {
+            if (parsed && parsed.uid === fbUser.uid && isUserProfileComplete(parsed)) {
               existingSession = parsed;
-              setUser(parsed);
             } else {
-              // Limpa cache que continha apenas número de telefone ou perfil incompleto
+              // Limpa imediatamente o localStorage e sessionStorage caso o cache seja de outro usuário
               localStorage.removeItem('zapchat_user');
+              localStorage.removeItem('zapchat_token');
+              localStorage.removeItem('zapchat_local_chats');
+              sessionStorage.removeItem('tribbu_pending_user');
             }
           }
-        } catch (_) {}
+        } catch (_) {
+          try {
+            localStorage.removeItem('zapchat_user');
+            sessionStorage.removeItem('tribbu_pending_user');
+          } catch (_) {}
+        }
 
         // Listen to Firestore doc /users/{uid} in real-time
         try {
@@ -357,6 +369,7 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
                   profileCompleted: true
                 };
                 setUser(session);
+                setIsAuthReady(true);
                 try {
                   localStorage.setItem('zapchat_user', JSON.stringify(session));
                 } catch (_) {}
@@ -364,20 +377,40 @@ export default function App({ userSession, onLogout }: MainChatAppProps = {}) {
                 if (window.location.pathname === '/login') {
                   navigate('/chat');
                 }
-              } else if (!existingSession) {
-                // Perfil pendente na coleção /users: a coordenação de rotas é tratada pelo App.jsx
+              } else if (existingSession && existingSession.uid === fbUser.uid) {
+                setUser(existingSession);
+                setIsAuthReady(true);
+              } else {
+                // Perfil pendente na coleção /users: limpa sessão antiga e aguarda cadastro
                 setUser(null);
+                setIsAuthReady(true);
+                try {
+                  localStorage.removeItem('zapchat_user');
+                  localStorage.removeItem('zapchat_token');
+                } catch (_) {}
               }
             },
             () => {
-              // Silencioso em caso de offline
+              if (existingSession && existingSession.uid === fbUser.uid) {
+                setUser(existingSession);
+              }
+              setIsAuthReady(true);
             }
           );
         } catch {
-          // Silencioso
+          setIsAuthReady(true);
         }
-      } else if (!userSession) {
+      } else {
+        // Se onAuthStateChanged retornar nulo, limpa imediatamente localStorage e sessionStorage
         setUser(null);
+        setIsAuthReady(true);
+        try {
+          localStorage.removeItem('zapchat_user');
+          localStorage.removeItem('zapchat_token');
+          localStorage.removeItem('zapchat_local_chats');
+          localStorage.removeItem('tribbu_pending_phone');
+          sessionStorage.removeItem('tribbu_pending_user');
+        } catch (_) {}
       }
       setIsInitializing(false);
     });
