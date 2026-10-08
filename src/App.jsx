@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Cadastro from './components/Cadastro.jsx';
 import LoginScreen from './components/LoginScreen';
 import MainChatApp from './App.tsx';
+import SplashScreen from './components/SplashScreen';
 import { auth, db } from './firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
@@ -30,6 +31,15 @@ export default function App() {
     }
     return '/';
   });
+
+  const [showSplash, setShowSplash] = useState(true);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setShowSplash(false);
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, []);
 
   const [currentUser, setCurrentUser] = useState(() => auth.currentUser);
   const [isAuthReady, setIsAuthReady] = useState(false);
@@ -203,6 +213,11 @@ export default function App() {
     (currentUser && !hasCompletedProfile) ||
     (pendingCadastroUser && !hasCompletedProfile)
   );
+
+  // Exibe a tela de abertura profissional (SplashScreen) enquanto o tempo de apresentação ou inicialização estiver ativo
+  if (showSplash) {
+    return <SplashScreen />;
+  }
 
   // Aguarda a resolução inicial da autenticação Firebase para evitar transição dupla (tela de login piscando e logo em seguida tela de conversa)
   if (!isAuthReady) {

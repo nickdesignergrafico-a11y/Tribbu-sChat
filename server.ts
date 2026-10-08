@@ -300,22 +300,20 @@ async function startServer() {
     });
   });
 
-  // GET /api/users/check (validate if an E.164 phone number belongs to a registered app user)
+  // GET /api/users/check (Busca robusta de usuário cadastrado por número de telefone)
   app.get('/api/users/check', (req, res) => {
     const rawPhone = String(req.query.phone || '');
-    const digitsOnly = rawPhone.replace(/[\s().+-]/g, '').replace(/\D/g, '');
-    const e164Phone = digitsOnly ? `+${digitsOnly}` : '';
+    // Mantém apenas os números puramente
+    const digitsOnly = rawPhone.replace(/\D/g, '');
 
-    if (!e164Phone || e164Phone.length < 8 || e164Phone.length > 16) {
+    if (!digitsOnly || digitsOnly.length < 8) {
       return res.status(200).json({ exists: false });
     }
 
     const foundUser = db.users.find((u) => {
-      const uDigits = (u.phoneNumber || '').replace(/[\s().+-]/g, '').replace(/\D/g, '');
-      const uE164 = uDigits ? `+${uDigits}` : '';
-      if (!uE164 || uE164.length < 8 || uE164.length > 16) return false;
-      if (uE164 === e164Phone) return true;
-      return uDigits.endsWith(digitsOnly) || digitsOnly.endsWith(uDigits);
+      const uDigits = (u.phoneNumber || '').replace(/\D/g, '');
+      // Se forem exatamente iguais ou se um termina com o outro (tratando falta de DDD/DDI)
+      return uDigits === digitsOnly || uDigits.endsWith(digitsOnly) || digitsOnly.endsWith(uDigits);
     });
 
     if (foundUser) {
@@ -366,19 +364,7 @@ async function startServer() {
       members: isGroup ? [creator] : undefined,
       description: description || (isGroup ? 'Grupo criado no ZapChat' : undefined),
       createdAt: new Date().toISOString(),
-      messages: [
-        {
-          id: 'welcome-' + Date.now(),
-          senderPhoneNumber: '+5500000000000',
-          senderName: 'Sistema',
-          text: isGroup 
-            ? `Você criou o grupo "${name}". Compartilhe o link de convite com seus contatos para que entrem!` 
-            : `Nova conversa iniciada com ${name}. Envie uma mensagem!`,
-          time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-          timestamp: Date.now(),
-          status: 'read'
-        }
-      ]
+      messages: []
     };
 
     db.chats.unshift(newChat);
@@ -465,7 +451,7 @@ async function startServer() {
     });
   });
 
-  // POST /api/chats/:chatId/messages (send a message)
+  // POST /api/chats/:chatId/messages (Garante ordenação cronológica correta e IDs únicos)
   app.post('/api/chats/:chatId/messages', (req: any, res) => {
     const { chatId } = req.params;
     const { id, text, senderPhoneNumber, userEmail, senderName: nameInput, senderId, type, mediaUrl, fileName, fileSize, contactName, contactPhone } = req.body;
@@ -479,12 +465,12 @@ async function startServer() {
       return res.status(404).json({ error: 'Conversa não encontrada.' });
     }
 
-    const messageId = id || ('msg-' + Date.now());
-
-    // Prevent duplicate insert if already present
+    // Se o front enviar um ID duplicado muito rápido, geramos um sufixo de tempo único para não engolir a mensagem consecutiva
+    let messageId = id || ('msg-' + Date.now() + '-' + Math.random().toString(36).substring(2, 5));
+    
     const existingMsg = chat.messages.find(m => m.id === messageId);
     if (existingMsg) {
-      return res.status(200).json(existingMsg);
+      messageId = 'msg-' + Date.now() + '-' + Math.random().toString(36).substring(2, 5);
     }
 
     const phone = senderPhoneNumber || userEmail || (req.user && (req.user.phoneNumber || req.user.email)) || '+5511999999999';
@@ -498,7 +484,7 @@ async function startServer() {
       senderId,
       text: text || (fileName ? `[Arquivo: ${fileName}]` : ''),
       time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-      timestamp: Date.now(),
+      timestamp: Date.now(), // Marca temporal exata
       status: 'sent',
       type: type || 'text',
       mediaUrl,
@@ -509,8 +495,11 @@ async function startServer() {
     };
 
     chat.messages.push(newMessage);
-    saveDB();
 
+    // 🔥 SOLUÇÃO DO BALÃO INVERTIDO: Força a ordenação do menor timestamp para o maior
+    chat.messages.sort((a, b) => a.timestamp - b.timestamp);
+    
+    saveDB();
     res.status(201).json(newMessage);
   });
 

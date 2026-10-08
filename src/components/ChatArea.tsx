@@ -94,6 +94,7 @@ export default function ChatArea({
   onRevokeInvite
 }: ChatAreaProps) {
   const { logoUrl } = useBranding();
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [inputText, setInputText] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
@@ -141,6 +142,13 @@ export default function ChatArea({
     }
     setActiveDeleteMsgId(null);
     longPressTriggeredRef.current = false;
+  };
+
+  const handleDeleteChat = () => {
+    if (window.confirm("Tem certeza que deseja apagar esta conversa?")) {
+      console.log("Excluir chat:", chat?.id);
+      // TODO: Integrar com a rota DELETE /api/chats/:chatId no futuro
+    }
   };
   
   // Active "Aviso da Tribbu" (24h) for Groups and Channels
@@ -933,8 +941,15 @@ export default function ChatArea({
 
           {/* Contact Avatar / Profile Photo */}
           <div 
-            className="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center text-white font-semibold text-base relative shadow-md overflow-hidden"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (chat.photoURL) {
+                setIsProfileModalOpen(true);
+              }
+            }}
+            className={`w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center text-white font-semibold text-base relative shadow-md overflow-hidden ${chat.photoURL ? 'cursor-pointer hover:opacity-90 transition-opacity' : ''}`}
             style={{ backgroundColor: chat.avatarColor || '#06B6D4' }}
+            title={chat.photoURL ? "Clique para ver a foto de perfil" : undefined}
           >
             {chat.isAI || chat.id === 'tribbu-ai' ? (
               <div className="w-full h-full bg-gradient-to-br from-cyan-950 via-[#041a24] to-slate-950 flex items-center justify-center relative border-2 border-cyan-400 shadow-[0_0_12px_rgba(6,182,212,0.6)]">
@@ -1027,6 +1042,17 @@ export default function ChatArea({
               <Info className="w-5 h-5" />
             </button>
           )}
+
+          {/* Delete chat button */}
+          <button 
+            onClick={handleDeleteChat}
+            className="p-2 text-slate-400 hover:text-red-500 rounded-full hover:bg-slate-800/50 transition-colors cursor-pointer"
+            title="Apagar conversa"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+            </svg>
+          </button>
 
           {/* Options Menu Toggle */}
           <div className="relative">
@@ -2075,6 +2101,40 @@ export default function ChatArea({
           onPublishStatus={async () => {}}
           onPublishTextStatus={handlePublishGroupNotice}
         />
+      )}
+
+      {/* Profile Photo Expansion Modal */}
+      {isProfileModalOpen && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200"
+          onClick={() => setIsProfileModalOpen(false)}
+        >
+          <button 
+            type="button"
+            className="absolute top-4 right-4 text-white hover:text-slate-300 bg-slate-800/60 p-2.5 rounded-full transition-colors cursor-pointer z-10 shadow-lg"
+            onClick={() => setIsProfileModalOpen(false)}
+            title="Fechar"
+          >
+            <X className="h-6 w-6" />
+          </button>
+          <div 
+            className="relative max-w-sm sm:max-w-md w-full flex flex-col items-center justify-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-64 h-64 sm:w-80 sm:h-80 md:w-96 md:h-96 rounded-2xl overflow-hidden shadow-2xl border border-white/20 bg-slate-900/90 relative flex items-center justify-center">
+              <img 
+                src={chat?.photoURL || "/default-avatar.png"} 
+                alt={chat?.name || "Foto de Perfil"} 
+                className="w-full h-full object-cover"
+              />
+            </div>
+            {chat?.name && (
+              <p className="mt-4 text-white font-medium text-base text-center bg-slate-900/80 px-4 py-1.5 rounded-full border border-white/10 shadow-md">
+                {chat.name}
+              </p>
+            )}
+          </div>
+        </div>
       )}
 
       {/* Hidden file input elements for media upload */}
